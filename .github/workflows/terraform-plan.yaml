@@ -1,0 +1,41 @@
+name: Terraform Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_file:
+        description: "Env file to source (e.g., test.env)"
+        required: true
+        default: "test.env"
+      backend_bucket:
+        description: "Terraform backend S3 bucket"
+        required: true
+      prefix_key:
+        description: "Terraform .tfstate key prefix (e.g., envs/test/banking-terraform.tfstate)"
+        required: true
+
+env:
+  AWS_REGION: us-east-2
+
+jobs:
+  terraform-plan:
+    name: Run Terraform plan
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform plan
+        run: |
+          make plan \
+            ENV_FILE="${{ inputs.environment_file }}" \
+            BACKEND_BUCKET="${{ inputs.backend_bucket }}" \
+            PREFIX_KEY="${{ inputs.prefix_key }}"
