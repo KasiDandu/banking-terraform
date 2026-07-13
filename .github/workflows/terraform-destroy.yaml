@@ -1,4 +1,4 @@
-name: Terraform Apply
+name: Terraform Destroy
 
 on:
   workflow_dispatch:
@@ -17,24 +17,39 @@ on:
         description: "DynamoDB table used for Terraform state locking"
         required: false
         default: "banking-data-test-tfstate-lock"
+      confirm:
+        description: "Type 'destroy' to confirm you want to tear down every resource in this state"
+        required: true
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
 
 jobs:
+  guard:
+    name: Confirm destroy intent
+    runs-on: self-hosted
+    steps:
+      - name: Check confirmation phrase
+        run: |
+          if [ "${{ inputs.confirm }}" != "destroy" ]; then
+            echo "::error::confirm input must be exactly 'destroy' -- refusing to proceed."
+            exit 1
+          fi
+
   plan:
-    name: Run Terraform plan
+    name: Run Terraform destroy-plan
+    needs: guard
     uses: ./.github/workflows/terraform-plan.yaml
     with:
       environment_file: ${{ inputs.environment_file }}
       backend_bucket: ${{ inputs.backend_bucket }}
       prefix_key: ${{ inputs.prefix_key }}
       lock_table: ${{ inputs.lock_table }}
-      destroy: false
+      destroy: true
     secrets: inherit
 
-  apply:
-    name: Apply Terraform plan
+  destroy:
+    name: Apply destroy-plan
     needs: plan
     runs-on: self-hosted
     environment: production
@@ -59,10 +74,10 @@ jobs:
             AWS_REGION="${{ env.AWS_REGION }}" \
             LOCK_TABLE="${{ inputs.lock_table }}"
 
-      - name: Download plan artifact
+      - name: Download destroy-plan artifact
         uses: actions/download-artifact@v4
         with:
           name: tfplan
 
-      - name: Terraform apply
+      - name: Terraform destroy (apply destroy-plan)
         run: make apply

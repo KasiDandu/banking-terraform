@@ -18,6 +18,27 @@ on:
         required: false
         default: "banking-data-test-tfstate-lock"
 
+  workflow_call:
+    inputs:
+      environment_file:
+        type: string
+        required: true
+      backend_bucket:
+        type: string
+        required: true
+      prefix_key:
+        type: string
+        required: true
+      lock_table:
+        type: string
+        required: false
+        default: "banking-data-test-tfstate-lock"
+      destroy:
+        description: "Produce a destroy-plan instead of a regular plan"
+        type: boolean
+        required: false
+        default: false
+
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   TF_VAR_artifact_bucket: ${{ vars.ARTIFACT_BUCKET }}
@@ -58,7 +79,8 @@ jobs:
             BACKEND_BUCKET="${{ inputs.backend_bucket }}" \
             PREFIX_KEY="${{ inputs.prefix_key }}" \
             AWS_REGION="${{ env.AWS_REGION }}" \
-            LOCK_TABLE="${{ inputs.lock_table }}"
+            LOCK_TABLE="${{ inputs.lock_table }}" \
+            DESTROY="${{ inputs.destroy || 'false' }}"
 
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
