@@ -1,0 +1,27 @@
+{
+  "source_name": "transactions",
+  "raw_key_prefix": "raw/transactions/",
+  "file_format": "csv",
+  "csv_options": { "delimiter": ",", "header": true },
+  "schema": [
+    { "name": "transaction_id", "dtype": "int", "nullable": false },
+    { "name": "account_id", "dtype": "int", "nullable": false },
+    { "name": "transaction_date", "dtype": "date", "nullable": false },
+    {
+      "name": "transaction_type",
+      "dtype": "string",
+      "nullable": false,
+      "possible_values": ["Deposit", "Withdrawal", "Transfer", "Payment"]
+    },
+    { "name": "amount", "dtype": "float", "nullable": false },
+    { "name": "description", "dtype": "string", "nullable": true }
+  ],
+  "target": {
+    "database": "banking_data",
+    "table": "transactions",
+    "s3_prefix": "processed/transactions/",
+    "load_mode": "append",
+    "primary_keys": ["transaction_id"]
+  },
+  "crawler": { "name": "banking-data-transactions-crawler" }
+}

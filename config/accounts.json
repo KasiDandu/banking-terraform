@@ -1,0 +1,26 @@
+{
+  "source_name": "accounts",
+  "raw_key_prefix": "raw/accounts/",
+  "file_format": "csv",
+  "csv_options": { "delimiter": ",", "header": true },
+  "schema": [
+    { "name": "account_id", "dtype": "int", "nullable": false },
+    { "name": "customer_id", "dtype": "int", "nullable": false },
+    {
+      "name": "account_type",
+      "dtype": "string",
+      "nullable": false,
+      "possible_values": ["Checking", "Savings", "Credit"]
+    },
+    { "name": "opening_date", "dtype": "date", "nullable": false },
+    { "name": "balance", "dtype": "float", "nullable": false }
+  ],
+  "target": {
+    "database": "banking_data",
+    "table": "accounts",
+    "s3_prefix": "processed/accounts/",
+    "load_mode": "truncate_load",
+    "primary_keys": ["account_id"]
+  },
+  "crawler": { "name": "banking-data-accounts-crawler" }
+}
