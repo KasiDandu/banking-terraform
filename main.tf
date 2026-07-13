@@ -8,6 +8,26 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
+# Terraform state lock (S3 backend's dynamodb_table) -- bootstrapped via the
+# AWS CLI before this resource block existed, then imported, since the S3
+# backend must be able to acquire a lock in this table before it can run any
+# operation on this very configuration, including creating the table itself.
+# ---------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "terraform_lock" {
+  name         = "${local.name_prefix}-tfstate-lock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+
+  tags = { Name = "${local.name_prefix}-tfstate-lock" }
+}
+
+# ---------------------------------------------------------------------------
 # S3 buckets
 # ---------------------------------------------------------------------------
 

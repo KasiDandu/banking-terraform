@@ -4,6 +4,7 @@ ENV_FILE ?= test.env
 BACKEND_BUCKET ?=
 PREFIX_KEY ?=
 AWS_REGION ?= us-east-2
+LOCK_TABLE ?= banking-data-test-tfstate-lock
 
 .PHONY: init fmt validate plan apply destroy
 
@@ -12,7 +13,8 @@ init:
 	terraform init \
 	  -backend-config="bucket=$(BACKEND_BUCKET)" \
 	  -backend-config="key=$(PREFIX_KEY)" \
-	  -backend-config="region=$(AWS_REGION)"
+	  -backend-config="region=$(AWS_REGION)" \
+	  -backend-config="dynamodb_table=$(LOCK_TABLE)"
 
 fmt:
 	terraform fmt -recursive

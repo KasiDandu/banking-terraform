@@ -13,6 +13,10 @@ on:
       prefix_key:
         description: "Terraform .tfstate key prefix (e.g., envs/test/banking-terraform.tfstate)"
         required: true
+      lock_table:
+        description: "DynamoDB table used for Terraform state locking"
+        required: false
+        default: "banking-data-test-tfstate-lock"
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
@@ -53,7 +57,8 @@ jobs:
             ENV_FILE="${{ inputs.environment_file }}" \
             BACKEND_BUCKET="${{ inputs.backend_bucket }}" \
             PREFIX_KEY="${{ inputs.prefix_key }}" \
-            AWS_REGION="${{ env.AWS_REGION }}"
+            AWS_REGION="${{ env.AWS_REGION }}" \
+            LOCK_TABLE="${{ inputs.lock_table }}"
 
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
@@ -85,7 +90,8 @@ jobs:
             ENV_FILE="${{ inputs.environment_file }}" \
             BACKEND_BUCKET="${{ inputs.backend_bucket }}" \
             PREFIX_KEY="${{ inputs.prefix_key }}" \
-            AWS_REGION="${{ env.AWS_REGION }}"
+            AWS_REGION="${{ env.AWS_REGION }}" \
+            LOCK_TABLE="${{ inputs.lock_table }}"
 
       - name: Download plan artifact
         uses: actions/download-artifact@v4
