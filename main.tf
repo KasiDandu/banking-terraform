@@ -2,6 +2,9 @@ data "aws_caller_identity" "current" {}
 
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
+  source_names = sort([
+    for f in fileset("${path.module}/config", "*.json") : trimsuffix(f, ".json")
+  ])
 }
 
 # ---------------------------------------------------------------------------
@@ -26,6 +29,11 @@ resource "aws_s3_bucket" "data" {
 resource "aws_s3_bucket" "cloudtrail_logs" {
   bucket = "${local.name_prefix}-cloudtrail-${data.aws_caller_identity.current.account_id}"
   tags   = { Name = "${local.name_prefix}-cloudtrail" }
+}
+
+resource "aws_s3_bucket" "athena_results" {
+  bucket = "${local.name_prefix}-athena-results-${data.aws_caller_identity.current.account_id}"
+  tags   = { Name = "${local.name_prefix}-athena-results" }
 }
 
 data "aws_iam_policy_document" "cloudtrail_bucket" {
@@ -71,6 +79,21 @@ resource "aws_glue_catalog_database" "this" {
   name = var.glue_database_name
 }
 
+resource "aws_athena_workgroup" "this" {
+  name = "${local.name_prefix}-athena"
+
+  configuration {
+    enforce_workgroup_configuration    = true
+    publish_cloudwatch_metrics_enabled = true
+
+    result_configuration {
+      output_location = "s3://${aws_s3_bucket.athena_results.bucket}/"
+    }
+  }
+
+  tags = { Name = "${local.name_prefix}-athena" }
+}
+
 resource "aws_glue_catalog_table" "audit_lineage" {
   name          = "audit_lineage"
   database_name = aws_glue_catalog_database.this.name
@@ -79,10 +102,12 @@ resource "aws_glue_catalog_table" "audit_lineage" {
   parameters = {
     classification              = "parquet"
     "projection.enabled"        = "true"
-    "projection.source.type"    = "injected"
-    "projection.dt.type"        = "injected"
-    "projection.run_id.type"    = "injected"
-    "storage.location.template" = "s3://${aws_s3_bucket.data.bucket}/audit/lineage/source=$${source}/dt=$${dt}/run_id=$${run_id}"
+    "projection.source.type"    = "enum"
+    "projection.source.values"  = join(",", local.source_names)
+    "projection.dt.type"        = "date"
+    "projection.dt.format"      = "yyyy-MM-dd"
+    "projection.dt.range"       = "NOW-4YEARS,NOW+1DAYS"
+    "storage.location.template" = "s3://${aws_s3_bucket.data.bucket}/audit/lineage/source=$${source}/dt=$${dt}/"
   }
 
   partition_keys {
@@ -91,10 +116,6 @@ resource "aws_glue_catalog_table" "audit_lineage" {
   }
   partition_keys {
     name = "dt"
-    type = "string"
-  }
-  partition_keys {
-    name = "run_id"
     type = "string"
   }
 
@@ -109,6 +130,7 @@ resource "aws_glue_catalog_table" "audit_lineage" {
 
     dynamic "columns" {
       for_each = {
+        run_id                   = "string"
         source_name              = "string"
         raw_s3_bucket            = "string"
         raw_s3_key               = "string"
@@ -297,7 +319,7 @@ data "aws_iam_policy_document" "glue_job_permissions" {
   }
 
   statement {
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
     resources = [aws_s3_bucket.data.arn, "${aws_s3_bucket.data.arn}/*"]
   }
 

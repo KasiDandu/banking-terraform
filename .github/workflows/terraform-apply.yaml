@@ -1,4 +1,4 @@
-name: Terraform Plan
+name: Terraform Apply
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ env:
   TF_VAR_glue_common_s3_key: ${{ inputs.glue_common_s3_key }}
 
 jobs:
-  terraform-plan:
+  plan:
     name: Run Terraform plan
     runs-on: self-hosted
 
@@ -61,3 +61,36 @@ jobs:
           name: tfplan
           path: tfplan
           retention-days: 1
+
+  apply:
+    name: Apply Terraform plan
+    needs: plan
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Re-init backend
+        run: |
+          make init \
+            ENV_FILE="${{ inputs.environment_file }}" \
+            BACKEND_BUCKET="${{ inputs.backend_bucket }}" \
+            PREFIX_KEY="${{ inputs.prefix_key }}" \
+            AWS_REGION="${{ env.AWS_REGION }}"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+
+      - name: Terraform apply
+        run: make apply

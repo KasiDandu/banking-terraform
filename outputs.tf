@@ -27,3 +27,13 @@ output "glue_database_name" {
   description = "Shared Glue Catalog database."
   value       = aws_glue_catalog_database.this.name
 }
+
+output "athena_results_bucket" {
+  description = "Bucket Athena writes query results to."
+  value       = aws_s3_bucket.athena_results.bucket
+}
+
+output "athena_workgroup" {
+  description = "Athena workgroup configured with the results bucket as its output location."
+  value       = aws_athena_workgroup.this.name
+}
