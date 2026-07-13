@@ -4,6 +4,12 @@ variable "aws_region" {
   default     = "us-east-2"
 }
 
+variable "assume_role_arn" {
+  description = "IAM role to assume before provisioning, for cross-account environment promotion (e.g. a separate prod account). Null uses ambient credentials as-is."
+  type        = string
+  default     = null
+}
+
 variable "environment" {
   description = "Environment name (test, staging, prod)."
   type        = string

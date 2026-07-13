@@ -47,3 +47,35 @@ Trigger the `Terraform Plan` workflow manually (`workflow_dispatch`) with:
 Requires repo secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` with
 permissions for the backend bucket, the lock table, and any resources in
 `main.tf`.
+
+## Environment promotion (Terragrunt)
+
+`live/test/` and `live/prod/` wrap this same module with per-environment
+config, so promoting a change is "run it in test, then run the identical
+plan in prod" rather than hand-editing variables:
+
+```
+cd live/test && terragrunt plan   # or apply
+cd live/prod && terragrunt plan   # once prod is real -- see below
+```
+
+- `terragrunt.hcl` (repo root) — shared `remote_state` config (backend
+  bucket/key/region/lock table), read from each environment's `env.hcl` via
+  `get_terragrunt_dir()`. One definition, not copy-pasted per environment.
+- `live/<env>/env.hcl` — the small set of facts that actually differ per
+  environment (account, region, state location, artifact bucket, build keys).
+- `live/<env>/terragrunt.hcl` — `terraform { source = "../.." }` (this repo
+  is the module) plus `inputs` sourced from `env.hcl`.
+- `live/test/` points at the real, already-deployed stack — `terragrunt
+  plan` there reports "No changes", confirming it's the same infrastructure
+  build/apply have been managing all along, not a parallel copy.
+- `live/prod/` is a **placeholder**: there's no second AWS account yet, so
+  every account-specific value (`aws_account_id`, `assume_role_arn`,
+  `backend_bucket`, `artifact_bucket`, ...) in `live/prod/env.hcl` points at
+  something that doesn't exist. This is deliberate — running Terragrunt
+  there fails loudly (AssumeRole / NoSuchBucket) instead of silently
+  deploying "prod" resources into the test account. `providers.tf`'s
+  `assume_role_arn` variable is what makes cross-account promotion possible
+  once a real prod account exists: fill in `live/prod/env.hcl` per its
+  inline comments, bootstrap its S3 bucket + lock table the same way test's
+  were (see "State locking" above), and it's a real second environment.
