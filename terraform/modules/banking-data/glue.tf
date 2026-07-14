@@ -16,6 +16,15 @@ resource "aws_glue_job" "this" {
   max_retries       = each.value.max_retries
   timeout           = each.value.timeout
 
+  # Defaults to Glue's own default of 1 if unset in JSON, which silently
+  # serializes every run of a job -- discovered live: 3 files landing within
+  # seconds of each other triggered ConcurrentRunsExceededException for two
+  # of them, relying on EventBridge's Lambda retry/backoff to eventually
+  # get them through instead of running them properly in parallel.
+  execution_property {
+    max_concurrent_runs = lookup(each.value, "max_concurrent_runs", 1)
+  }
+
   command {
     name            = "glueetl"
     script_location = "s3://${var.artifact_bucket}/${var.glue_script_s3_keys[each.key]}"

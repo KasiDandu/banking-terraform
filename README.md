@@ -21,17 +21,17 @@ banking-terraform/
     ├── backend/                   # one-time bootstrap: state bucket + lock table
     │   └── main.tf                # (local state -- can't depend on the backend it creates)
     ├── live/                      # Terragrunt roots, one per module, siblings
+    │   ├── banking-data.tfvars    # sha256 artifact version pins for the banking-data module (CI overwrites this per run)
     │   ├── buckets/
     │   │   ├── terragrunt.hcl
     │   │   └── buckets.json       # factory config: named S3 buckets
     │   ├── iam/
     │   │   └── terragrunt.hcl     # no JSON -- nothing environment-tunable to configure
     │   └── banking-data/
-    │       ├── terragrunt.hcl     # dependencies{} on buckets, dependency{} on iam
+    │       ├── terragrunt.hcl     # dependencies{} on buckets, dependency{} on iam; -var-file points at ../banking-data.tfvars
     │       ├── glue.json          # factory config: named Glue jobs
     │       ├── lambda.json        # factory config: named Lambda functions
-    │       ├── eventbridge-rules.json  # factory config: EventBridge rules (array)
-    │       └── banking-data.tfvars     # the one value that's truly constant: project_name
+    │       └── eventbridge-rules.json  # factory config: EventBridge rules (array)
     └── modules/                   # one Terraform module per Terragrunt root, same names
         ├── buckets/                # S3 bucket factory + SSM params + landing bucket EventBridge notification
         ├── iam/                    # Lambda/Glue-job/crawler roles + baseline managed policy only
@@ -162,15 +162,23 @@ not from separate per-environment directories:
 
 - Each unit's `terragrunt.hcl` reads `BACKEND_BUCKET`, `PREFIX_KEY`,
   `AWS_REGION`, `LOCK_TABLE` via `get_env(...)`.
-- `environments/test.env` sets everything account/build-specific
-  (`TF_VAR_environment`, `TF_VAR_artifact_bucket`, the build S3 key maps,
-  `BACKEND_BUCKET`, etc.) for the real, already-deployed stack.
+- `environments/test.env` sets everything account-specific
+  (`TF_VAR_environment`, `TF_VAR_artifact_bucket`, `BACKEND_BUCKET`, etc.)
+  for the real, already-deployed stack.
 - `environments/prod.env` is a **placeholder**: there's no second AWS
   account yet, so every account-specific value (`assume_role_arn`,
   `BACKEND_BUCKET`, `artifact_bucket`, ...) points at something that doesn't
   exist. This is deliberate — running against `prod` fails loudly
   (AssumeRole / NoSuchBucket) instead of silently deploying "prod"
   resources into the test account.
+- The build's sha256 artifact keys (`lambda_s3_keys`, `glue_script_s3_keys`,
+  `glue_common_s3_key`) are *not* env-specific — they come from
+  `terraform/live/banking-data.tfvars` via the banking-data unit's
+  `extra_arguments "-var-file"`, shared across environments since the same
+  build has the same content hash regardless of which account's artifact
+  bucket it's promoted into. A `-var-file` outranks `TF_VAR_*`, so CI
+  overwrites that one file with the latest build's keys before planning
+  instead of exporting env vars.
 - Each module's `providers.tf`'s `assume_role_arn` variable is what makes
   cross-account promotion possible once a real prod account exists.
 

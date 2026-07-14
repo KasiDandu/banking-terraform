@@ -53,9 +53,12 @@ remote_state {
 terraform {
   source = "../../modules/banking-data"
 
+  # Lives one level up (terraform/live/banking-data.tfvars), not nested in
+  # this module's own directory -- every module's version-pin file sits in
+  # one place at the terraform/live/ level.
   extra_arguments "var_files" {
     commands  = ["plan", "apply", "destroy", "import", "refresh", "validate"]
-    arguments = ["-var-file=${get_terragrunt_dir()}/banking-data.tfvars"]
+    arguments = ["-var-file=${get_terragrunt_dir()}/../banking-data.tfvars"]
   }
 }
 

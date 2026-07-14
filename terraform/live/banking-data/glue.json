@@ -6,6 +6,7 @@
     "number_of_workers": 2,
     "timeout": 60,
     "max_retries": 0,
+    "max_concurrent_runs": 3,
     "python_version": "3",
     "default_arguments": {
       "--job-language": "python"
