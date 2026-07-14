@@ -27,18 +27,49 @@ variable "artifact_bucket" {
   type        = string
 }
 
-variable "lambda_s3_key" {
-  description = "Key of lambda.zip within artifact_bucket, e.g. lambda/sha256/<hash>/lambda.zip or lambda/<version>/lambda.zip."
-  type        = string
+# ---------------------------------------------------------------------------
+# Generic resource factories -- shape documented in
+# terraform/live/banking-data/{buckets,lambda,glue,eventbridge-rules}.json
+# ---------------------------------------------------------------------------
+
+variable "buckets" {
+  description = "Bucket factory config: { with_terraform_buckets = { <logical_key> = { bucket_suffix = string } } }."
+  type        = any
 }
 
-variable "glue_script_s3_key" {
-  description = "Key of glue_script.py within artifact_bucket."
-  type        = string
+variable "lambda_functions" {
+  description = "Lambda factory config, keyed by logical function name. See lambda.json."
+  type        = any
+}
+
+variable "glue_jobs" {
+  description = "Glue job factory config, keyed by logical job name. See glue.json."
+  type        = any
+}
+
+variable "eventbridge_rules" {
+  description = "List of EventBridge rule definitions. See eventbridge-rules.json."
+  type        = any
+}
+
+# ---------------------------------------------------------------------------
+# Per-build artifact locations -- change every release, kept separate from
+# the structural config above. CI resolves these dynamically; environments/
+# *.env pins a fallback snapshot for local/manual runs.
+# ---------------------------------------------------------------------------
+
+variable "lambda_s3_keys" {
+  description = "Map of lambda logical name -> its code's S3 key within artifact_bucket."
+  type        = map(string)
+}
+
+variable "glue_script_s3_keys" {
+  description = "Map of glue job logical name -> its script's S3 key within artifact_bucket."
+  type        = map(string)
 }
 
 variable "glue_common_s3_key" {
-  description = "Key of glue-common.zip within artifact_bucket."
+  description = "Key of glue-common.zip within artifact_bucket, shared --extra-py-files for every Glue job."
   type        = string
 }
 
@@ -49,7 +80,7 @@ variable "glue_database_name" {
 }
 
 variable "raw_key_prefix" {
-  description = "Key prefix under the raw bucket that source objects land in, e.g. raw/<source_name>/<file>."
+  description = "Key prefix under the landing bucket that source objects land in, e.g. raw/<source_name>/<file>. Single source of truth for both the event_handler Lambda's RAW_KEY_PREFIX env var and the EventBridge S3-trigger rule's key filter."
   type        = string
   default     = "raw/"
 }
@@ -58,34 +89,4 @@ variable "config_key_prefix" {
   description = "Key prefix under the config bucket that per-source config JSON files live at."
   type        = string
   default     = "config/"
-}
-
-variable "lambda_runtime" {
-  description = "Lambda runtime for the EventBridge handler."
-  type        = string
-  default     = "python3.12"
-}
-
-variable "glue_version" {
-  description = "Glue version for the ETL job."
-  type        = string
-  default     = "4.0"
-}
-
-variable "glue_worker_type" {
-  description = "Glue worker type."
-  type        = string
-  default     = "G.1X"
-}
-
-variable "glue_number_of_workers" {
-  description = "Number of Glue workers."
-  type        = number
-  default     = 2
-}
-
-variable "glue_timeout_minutes" {
-  description = "Glue job timeout in minutes."
-  type        = number
-  default     = 60
 }

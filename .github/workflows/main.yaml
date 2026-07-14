@@ -59,8 +59,11 @@ jobs:
           echo "Resolved lambda_s3_key=$LAMBDA_KEY"
           echo "Resolved glue_script_s3_key=$GLUE_SCRIPT_KEY"
           echo "Resolved glue_common_s3_key=$GLUE_COMMON_KEY"
-          echo "TF_VAR_lambda_s3_key=$LAMBDA_KEY" >> "$GITHUB_ENV"
-          echo "TF_VAR_glue_script_s3_key=$GLUE_SCRIPT_KEY" >> "$GITHUB_ENV"
+          # lambda_s3_keys/glue_script_s3_keys are map(string) variables keyed
+          # by the logical name in lambda.json/glue.json -- banking-artifacts
+          # only builds one of each today, so each map has a single entry.
+          echo "TF_VAR_lambda_s3_keys={\"event_handler\":\"$LAMBDA_KEY\"}" >> "$GITHUB_ENV"
+          echo "TF_VAR_glue_script_s3_keys={\"etl\":\"$GLUE_SCRIPT_KEY\"}" >> "$GITHUB_ENV"
           echo "TF_VAR_glue_common_s3_key=$GLUE_COMMON_KEY" >> "$GITHUB_ENV"
 
       - name: Terragrunt plan (or destroy-plan)

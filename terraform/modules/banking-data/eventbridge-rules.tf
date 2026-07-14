@@ -1,43 +1,52 @@
-# CloudTrail (S3 data events on the raw bucket) -> EventBridge -> Lambda
+# Generic EventBridge rule factory over eventbridge-rules.json's array
+# (converted to a map keyed by rule name in main.tf's locals). Each rule is
+# either:
+#   - bucket_key + key_prefix -- this module auto-builds an S3 "Object
+#     Created" pattern against that internally-managed bucket (this
+#     pipeline's real trigger, fed by the landing bucket's native S3 ->
+#     EventBridge notifications enabled in buckets.tf), or
+#   - event_pattern -- a raw EventBridge pattern object, used as-is, or
+#   - schedule_expression -- a cron/rate rule instead of an event pattern.
+# Target is either an internally-managed Lambda (target.function_key) or
+# any external ARN (target.arn, e.g. a Step Function), each with its own
+# target.role_arn where the service needs one (e.g. Step Functions).
 
-resource "aws_cloudtrail" "raw_bucket_events" {
-  name                          = "${local.name_prefix}-raw-data-events"
-  s3_bucket_name                = aws_s3_bucket.cloudtrail_logs.id
-  include_global_service_events = false
-  is_multi_region_trail         = false
-  enable_logging                = true
-
-  event_selector {
-    read_write_type           = "WriteOnly"
-    include_management_events = false
-
-    data_resource {
-      type   = "AWS::S3::Object"
-      values = ["${aws_s3_bucket.raw.arn}/${var.raw_key_prefix}"]
-    }
+locals {
+  eventbridge_event_patterns = {
+    for name, rule in local.eventbridge_rules : name => (
+      lookup(rule, "bucket_key", null) != null ? jsonencode({
+        source      = ["aws.s3"]
+        detail-type = ["Object Created"]
+        detail = {
+          bucket = { name = [aws_s3_bucket.this[rule.bucket_key].bucket] }
+          object = { key = [{ prefix = var.raw_key_prefix }] }
+        }
+      }) : lookup(rule, "event_pattern", null) != null ? jsonencode(rule.event_pattern) : null
+    )
   }
-
-  depends_on = [aws_s3_bucket_policy.cloudtrail_logs]
 }
 
-resource "aws_cloudwatch_event_rule" "raw_object_created" {
-  name = "${local.name_prefix}-raw-object-created"
+resource "aws_cloudwatch_event_rule" "this" {
+  for_each = local.eventbridge_rules
 
-  event_pattern = jsonencode({
-    source      = ["aws.s3"]
-    detail-type = ["AWS API Call via CloudTrail"]
-    detail = {
-      eventSource = ["s3.amazonaws.com"]
-      eventName   = ["PutObject", "CompleteMultipartUpload"]
-      requestParameters = {
-        bucketName = [aws_s3_bucket.raw.bucket]
-      }
-    }
-  })
+  name        = "${local.name_prefix}-${each.key}"
+  description = lookup(each.value, "description", null)
+
+  event_pattern       = local.eventbridge_event_patterns[each.key]
+  schedule_expression = lookup(each.value, "schedule_expression", null)
 }
 
-resource "aws_cloudwatch_event_target" "invoke_lambda" {
-  rule      = aws_cloudwatch_event_rule.raw_object_created.name
-  target_id = "invoke-lambda"
-  arn       = aws_lambda_function.event_handler.arn
+resource "aws_cloudwatch_event_target" "this" {
+  for_each = local.eventbridge_rules
+
+  rule      = aws_cloudwatch_event_rule.this[each.key].name
+  target_id = each.key
+
+  arn = (
+    each.value.target.type == "lambda" && lookup(each.value.target, "function_key", null) != null
+    ? aws_lambda_function.this[each.value.target.function_key].arn
+    : each.value.target.arn
+  )
+
+  role_arn = lookup(each.value.target, "role_arn", null)
 }

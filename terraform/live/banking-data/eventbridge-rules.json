@@ -1,1 +1,11 @@
-{}
+[
+  {
+    "name": "raw-object-created",
+    "description": "Trigger the event handler Lambda when a new object lands in the raw/landing bucket",
+    "bucket_key": "landing",
+    "target": {
+      "type": "lambda",
+      "function_key": "event_handler"
+    }
+  }
+]

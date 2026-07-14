@@ -3,6 +3,14 @@ locals {
   source_names = sort([
     for f in fileset("${path.module}/config", "*.json") : trimsuffix(f, ".json")
   ])
+
+  buckets          = var.buckets.with_terraform_buckets
+  lambda_functions = var.lambda_functions
+  glue_jobs        = var.glue_jobs
+
+  # eventbridge-rules.json is a JSON array (each rule carries its own name),
+  # keyed here by that name so it can drive a Terraform for_each.
+  eventbridge_rules = { for r in var.eventbridge_rules : r.name => r }
 }
 
 # ---------------------------------------------------------------------------
@@ -42,7 +50,7 @@ resource "aws_athena_workgroup" "this" {
     publish_cloudwatch_metrics_enabled = true
 
     result_configuration {
-      output_location = "s3://${aws_s3_bucket.athena_results.bucket}/"
+      output_location = "s3://${aws_s3_bucket.this["athena"].bucket}/"
     }
   }
 
@@ -62,7 +70,7 @@ resource "aws_glue_catalog_table" "audit_lineage" {
     "projection.dt.type"        = "date"
     "projection.dt.format"      = "yyyy-MM-dd"
     "projection.dt.range"       = "NOW-4YEARS,NOW+1DAYS"
-    "storage.location.template" = "s3://${aws_s3_bucket.data.bucket}/audit/lineage/source=$${source}/dt=$${dt}/"
+    "storage.location.template" = "s3://${aws_s3_bucket.this["processed"].bucket}/audit/lineage/source=$${source}/dt=$${dt}/"
   }
 
   partition_keys {
@@ -75,7 +83,7 @@ resource "aws_glue_catalog_table" "audit_lineage" {
   }
 
   storage_descriptor {
-    location      = "s3://${aws_s3_bucket.data.bucket}/audit/lineage/"
+    location      = "s3://${aws_s3_bucket.this["processed"].bucket}/audit/lineage/"
     input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
     output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
 
@@ -119,26 +127,18 @@ resource "aws_glue_catalog_table" "audit_lineage" {
 # SSM parameters (operational visibility for other consumers)
 # ---------------------------------------------------------------------------
 
-resource "aws_ssm_parameter" "raw_bucket" {
-  name  = "/${var.project_name}/${var.environment}/raw_bucket"
+resource "aws_ssm_parameter" "buckets" {
+  for_each = local.buckets
+
+  name  = "/${var.project_name}/${var.environment}/buckets/${each.key}"
   type  = "String"
-  value = aws_s3_bucket.raw.bucket
+  value = aws_s3_bucket.this[each.key].bucket
 }
 
-resource "aws_ssm_parameter" "config_bucket" {
-  name  = "/${var.project_name}/${var.environment}/config_bucket"
-  type  = "String"
-  value = aws_s3_bucket.config.bucket
-}
+resource "aws_ssm_parameter" "glue_job_names" {
+  for_each = local.glue_jobs
 
-resource "aws_ssm_parameter" "data_bucket" {
-  name  = "/${var.project_name}/${var.environment}/data_bucket"
+  name  = "/${var.project_name}/${var.environment}/glue_jobs/${each.key}"
   type  = "String"
-  value = aws_s3_bucket.data.bucket
-}
-
-resource "aws_ssm_parameter" "glue_job_name" {
-  name  = "/${var.project_name}/${var.environment}/glue_job_name"
-  type  = "String"
-  value = aws_glue_job.etl.name
+  value = aws_glue_job.this[each.key].name
 }

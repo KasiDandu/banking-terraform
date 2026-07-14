@@ -1,3 +1,14 @@
 {
-  "lambda_runtime": "python3.12"
+  "event_handler": {
+    "description": "S3 upload handler -- starts the Glue ETL job for the uploaded source",
+    "handler": "lambda_function.handler",
+    "runtime": "python3.12",
+    "memory_size": 128,
+    "timeout": 30,
+    "reserved_concurrent_executions": -1,
+    "glue_job_key": "etl",
+    "environment_variables": {
+      "LOG_LEVEL": "INFO"
+    }
+  }
 }

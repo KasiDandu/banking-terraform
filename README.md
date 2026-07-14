@@ -21,22 +21,51 @@ banking-terraform/
     │   └── main.tf                # (local state -- can't depend on the backend it creates)
     ├── live/banking-data/         # Terragrunt root: wires the module to a backend
     │   ├── terragrunt.hcl
-    │   ├── glue.json              # resource-tuning inputs, split by AWS service
-    │   ├── lambda.json
-    │   ├── buckets.json
-    │   ├── eventbridge-rules.json
+    │   ├── glue.json              # factory config: named Glue jobs
+    │   ├── lambda.json            # factory config: named Lambda functions
+    │   ├── buckets.json           # factory config: named S3 buckets
+    │   ├── eventbridge-rules.json # factory config: EventBridge rules (array)
     │   └── banking-data.tfvars    # the one value that's truly constant: project_name
     └── modules/banking-data/      # the actual resources, split by AWS service
         ├── main.tf                # locals, state lock table, Glue Catalog + Athena, SSM
         ├── data.tf                # aws_caller_identity + all iam_policy_document data sources
-        ├── buckets.tf             # S3 buckets + bucket policy
-        ├── lambda.tf              # Lambda function + permission
-        ├── glue.tf                # Glue ETL job
-        ├── eventbridge-rules.tf   # CloudTrail + EventBridge rule/target
+        ├── buckets.tf             # S3 bucket factory + native S3->EventBridge notifications
+        ├── lambda.tf              # Lambda function factory + EventBridge invoke permissions
+        ├── glue.tf                # Glue job factory
+        ├── eventbridge-rules.tf   # EventBridge rule/target factory
         ├── iam-roles.tf           # Lambda/Glue-job/crawler roles, policies, attachments
         ├── variables.tf / outputs.tf / versions.tf / providers.tf / backend.tf
         └── config/*.json          # per-source schema configs, uploaded to the config bucket
 ```
+
+## Generic resource factories
+
+`buckets.tf`/`lambda.tf`/`glue.tf`/`eventbridge-rules.tf` are `for_each`
+factories over their matching JSON file in `terraform/live/banking-data/` —
+adding a new bucket, Lambda, Glue job, or EventBridge rule is a JSON edit,
+not a `.tf` edit:
+
+- **`buckets.json`** — `{ with_terraform_buckets = { <key> = { bucket_suffix = "..." } } }`. Other resources reference a bucket by key, e.g. `aws_s3_bucket.this["landing"]`. This pipeline's roles: `landing` (S3 upload trigger source), `config` (per-source JSON), `processed` (Glue output), `athena` (query results).
+- **`lambda.json`** — keyed by logical function name. A function's own `environment_variables` always apply; adding `glue_job_key` additionally wires in `CONFIG_BUCKET`/`GLUE_JOB_NAME`/`RAW_KEY_PREFIX`/`CONFIG_KEY_PREFIX` automatically (this is how `event_handler` knows which Glue job to start). Code location comes from `lambda_s3_keys[<key>]`, not this file (see "Build artifacts" below).
+- **`glue.json`** — keyed by logical job name. `--DATA_BUCKET`/`--CRAWLER_ROLE_ARN`/`--TempDir`/`--extra-py-files` are always merged in on top of each job's own `default_arguments`. Script location comes from `glue_script_s3_keys[<key>]`.
+- **`eventbridge-rules.json`** — a JSON *array* (each rule has its own `name`); converted to a map keyed by that name for `for_each`. A rule is either `bucket_key` (auto-builds an S3 "Object Created" pattern against that bucket, filtered by `raw_key_prefix` — this pipeline's real trigger) or a raw `event_pattern`/`schedule_expression`. `target` is either `function_key` (an internally-managed Lambda) or a direct external `arn` (e.g. a Step Function), with `role_arn` where the target service needs one.
+
+The S3 upload trigger is native S3 → EventBridge "Object Created"
+notifications (`aws_s3_bucket_notification` with `eventbridge = true` on the
+landing bucket) — not a CloudTrail data-events trail. Cheaper, lower
+latency, one less resource to manage. `banking-artifacts`'
+`lambda_function.py` parses that event shape (`detail.bucket.name` /
+`detail.object.key`, URL-decoded), not CloudTrail's.
+
+### Build artifacts
+
+`lambda_s3_keys` / `glue_script_s3_keys` are `map(string)` (keyed the same
+as `lambda.json`/`glue.json`), separate from the structural JSON above
+because they change every release. CI resolves them dynamically (see
+`main.yaml`); `environments/test.env` pins a fallback snapshot for
+local/manual runs via `${VAR:-default}`, which a pre-set CI value survives.
+`glue_common_s3_key` is a single shared string — the same `--extra-py-files`
+applies to every Glue job.
 
 ## Running locally
 
@@ -88,7 +117,7 @@ per-environment directories:
   `glue.json`/`lambda.json`/`buckets.json`/`eventbridge-rules.json` into its
   `inputs` (only the values that *don't* vary by environment).
 - `environments/test.env` sets everything account/build-specific
-  (`TF_VAR_environment`, `TF_VAR_artifact_bucket`, the three build S3 keys,
+  (`TF_VAR_environment`, `TF_VAR_artifact_bucket`, the build S3 key maps,
   `BACKEND_BUCKET`, etc.) for the real, already-deployed stack.
 - `environments/prod.env` is a **placeholder**: there's no second AWS
   account yet, so every account-specific value (`assume_role_arn`,

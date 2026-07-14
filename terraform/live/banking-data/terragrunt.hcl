@@ -13,6 +13,10 @@ locals {
   eventbridge_vars = jsondecode(file("eventbridge-rules.json"))
 }
 
+# Each JSON file's *entire* content maps to one whole module variable (a
+# factory config), not flat scalar keys -- so each gets wrapped under its
+# variable's name rather than merged flat.
+
 remote_state {
   backend = "s3"
   generate = {
@@ -41,9 +45,9 @@ terraform {
   }
 }
 
-inputs = merge(
-  local.glue_vars,
-  local.lambda_vars,
-  local.buckets_vars,
-  local.eventbridge_vars,
-)
+inputs = {
+  glue_jobs         = local.glue_vars
+  lambda_functions  = local.lambda_vars
+  buckets           = local.buckets_vars
+  eventbridge_rules = local.eventbridge_vars
+}

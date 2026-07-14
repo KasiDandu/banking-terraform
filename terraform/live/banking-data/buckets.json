@@ -1,4 +1,16 @@
 {
-  "raw_key_prefix": "raw/",
-  "config_key_prefix": "config/"
+  "with_terraform_buckets": {
+    "landing": {
+      "bucket_suffix": "raw"
+    },
+    "config": {
+      "bucket_suffix": "config"
+    },
+    "processed": {
+      "bucket_suffix": "data"
+    },
+    "athena": {
+      "bucket_suffix": "athena-results"
+    }
+  }
 }

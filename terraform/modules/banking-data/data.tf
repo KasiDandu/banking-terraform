@@ -1,35 +1,5 @@
 data "aws_caller_identity" "current" {}
 
-data "aws_iam_policy_document" "cloudtrail_bucket" {
-  statement {
-    sid       = "AWSCloudTrailAclCheck"
-    actions   = ["s3:GetBucketAcl"]
-    resources = [aws_s3_bucket.cloudtrail_logs.arn]
-
-    principals {
-      type        = "Service"
-      identifiers = ["cloudtrail.amazonaws.com"]
-    }
-  }
-
-  statement {
-    sid       = "AWSCloudTrailWrite"
-    actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.cloudtrail_logs.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["cloudtrail.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "s3:x-amz-acl"
-      values   = ["bucket-owner-full-control"]
-    }
-  }
-}
-
 data "aws_iam_policy_document" "lambda_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -43,12 +13,12 @@ data "aws_iam_policy_document" "lambda_assume" {
 data "aws_iam_policy_document" "lambda_permissions" {
   statement {
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.config.arn}/*"]
+    resources = ["${aws_s3_bucket.this["config"].arn}/*"]
   }
 
   statement {
     actions   = ["glue:StartJobRun"]
-    resources = [aws_glue_job.etl.arn]
+    resources = [for job in aws_glue_job.this : job.arn]
   }
 }
 
@@ -65,17 +35,17 @@ data "aws_iam_policy_document" "glue_assume" {
 data "aws_iam_policy_document" "glue_job_permissions" {
   statement {
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.raw.arn}/*"]
+    resources = ["${aws_s3_bucket.this["landing"].arn}/*"]
   }
 
   statement {
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.config.arn}/*"]
+    resources = ["${aws_s3_bucket.this["config"].arn}/*"]
   }
 
   statement {
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
-    resources = [aws_s3_bucket.data.arn, "${aws_s3_bucket.data.arn}/*"]
+    resources = [aws_s3_bucket.this["processed"].arn, "${aws_s3_bucket.this["processed"].arn}/*"]
   }
 
   statement {
@@ -102,6 +72,6 @@ data "aws_iam_policy_document" "glue_job_permissions" {
 data "aws_iam_policy_document" "crawler_permissions" {
   statement {
     actions   = ["s3:GetObject", "s3:ListBucket"]
-    resources = [aws_s3_bucket.data.arn, "${aws_s3_bucket.data.arn}/*"]
+    resources = [aws_s3_bucket.this["processed"].arn, "${aws_s3_bucket.this["processed"].arn}/*"]
   }
 }

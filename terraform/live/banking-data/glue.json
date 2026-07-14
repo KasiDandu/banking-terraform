@@ -1,7 +1,14 @@
 {
-  "glue_database_name": "banking_data",
-  "glue_version": "4.0",
-  "glue_worker_type": "G.1X",
-  "glue_number_of_workers": 2,
-  "glue_timeout_minutes": 60
+  "etl": {
+    "description": "Config-driven validate -> transform -> load(mode) -> lineage -> crawler ETL job",
+    "glue_version": "4.0",
+    "worker_type": "G.1X",
+    "number_of_workers": 2,
+    "timeout": 60,
+    "max_retries": 0,
+    "python_version": "3",
+    "default_arguments": {
+      "--job-language": "python"
+    }
+  }
 }
