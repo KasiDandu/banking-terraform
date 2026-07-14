@@ -1,21 +1,35 @@
-# Single live stack, reused across environments -- account/region/state
-# location come from shell env vars (BACKEND_BUCKET/PREFIX_KEY/AWS_REGION/
-# LOCK_TABLE, plus TF_VAR_environment/assume_role_arn/artifact_bucket/
-# *_s3_key) sourced from environments/<env>.env by deploys/Makefile before
-# terragrunt runs. Only the resource-tuning knobs that DON'T vary by account
-# live here, split by AWS service to match terraform/modules/banking-data's
-# file layout.
+# Sibling unit to ../buckets and ../iam. Bucket names are looked up via SSM
+# at the module level (not a Terragrunt dependency) -- but this unit still
+# needs buckets to exist first, hence `dependencies` (ordering only, no
+# outputs consumed) rather than skipping the relationship entirely. IAM role
+# names/ARNs *are* consumed via a `dependency` block, since this unit
+# attaches its own policies to roles the iam unit creates.
 
-locals {
-  glue_vars        = jsondecode(file("glue.json"))
-  lambda_vars      = jsondecode(file("lambda.json"))
-  buckets_vars     = jsondecode(file("buckets.json"))
-  eventbridge_vars = jsondecode(file("eventbridge-rules.json"))
+dependencies {
+  paths = ["../buckets"]
 }
 
-# Each JSON file's *entire* content maps to one whole module variable (a
-# factory config), not flat scalar keys -- so each gets wrapped under its
-# variable's name rather than merged flat.
+dependency "iam" {
+  config_path = "../iam"
+
+  # Only "validate" gets mocks (so this unit's HCL can be sanity-checked
+  # before iam has ever been applied) -- deliberately NOT "plan". A `plan`
+  # that gets saved and applied later must always be computed from the
+  # iam unit's *real* outputs: `terraform apply <planfile>` re-executes
+  # exactly what was planned, mock values baked in and all, ignoring
+  # fresher env vars at apply time. A mocked plan silently trying to
+  # attach policies to a role named "mock-glue-job-role" is exactly that
+  # failure mode. Apply ../iam for real before planning this unit.
+  mock_outputs = {
+    lambda_role_name   = "mock-lambda-role"
+    lambda_role_arn    = "arn:aws:iam::000000000000:role/mock-lambda-role"
+    glue_job_role_name = "mock-glue-job-role"
+    glue_job_role_arn  = "arn:aws:iam::000000000000:role/mock-glue-job-role"
+    crawler_role_name  = "mock-crawler-role"
+    crawler_role_arn   = "arn:aws:iam::000000000000:role/mock-crawler-role"
+  }
+  mock_outputs_allowed_terraform_commands = ["validate"]
+}
 
 remote_state {
   backend = "s3"
@@ -25,7 +39,7 @@ remote_state {
   }
   config = {
     bucket         = get_env("BACKEND_BUCKET")
-    key            = get_env("PREFIX_KEY")
+    key            = "${get_env("PREFIX_KEY")}/banking-data/terraform.tfstate"
     region         = get_env("AWS_REGION")
     dynamodb_table = get_env("LOCK_TABLE")
     encrypt        = true
@@ -45,9 +59,21 @@ terraform {
   }
 }
 
+locals {
+  glue_vars        = jsondecode(file("glue.json"))
+  lambda_vars      = jsondecode(file("lambda.json"))
+  eventbridge_vars = jsondecode(file("eventbridge-rules.json"))
+}
+
 inputs = {
   glue_jobs         = local.glue_vars
   lambda_functions  = local.lambda_vars
-  buckets           = local.buckets_vars
   eventbridge_rules = local.eventbridge_vars
+
+  lambda_role_name   = dependency.iam.outputs.lambda_role_name
+  lambda_role_arn    = dependency.iam.outputs.lambda_role_arn
+  glue_job_role_name = dependency.iam.outputs.glue_job_role_name
+  glue_job_role_arn  = dependency.iam.outputs.glue_job_role_arn
+  crawler_role_name  = dependency.iam.outputs.crawler_role_name
+  crawler_role_arn   = dependency.iam.outputs.crawler_role_arn
 }

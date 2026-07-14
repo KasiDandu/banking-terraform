@@ -1,19 +1,16 @@
-data "aws_caller_identity" "current" {}
+# Bucket names come from the buckets module via SSM Parameter Store lookup
+# (not a Terraform reference or Terragrunt dependency) -- decouples this
+# module from needing direct access to the buckets unit's state.
+data "aws_ssm_parameter" "buckets" {
+  for_each = toset(["landing", "config", "processed", "athena"])
 
-data "aws_iam_policy_document" "lambda_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["lambda.amazonaws.com"]
-    }
-  }
+  name = "/${var.project_name}/${var.environment}/buckets/${each.key}"
 }
 
 data "aws_iam_policy_document" "lambda_permissions" {
   statement {
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.this["config"].arn}/*"]
+    resources = ["arn:aws:s3:::${data.aws_ssm_parameter.buckets["config"].value}/*"]
   }
 
   statement {
@@ -22,30 +19,23 @@ data "aws_iam_policy_document" "lambda_permissions" {
   }
 }
 
-data "aws_iam_policy_document" "glue_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["glue.amazonaws.com"]
-    }
-  }
-}
-
 data "aws_iam_policy_document" "glue_job_permissions" {
   statement {
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.this["landing"].arn}/*"]
+    resources = ["arn:aws:s3:::${data.aws_ssm_parameter.buckets["landing"].value}/*"]
   }
 
   statement {
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.this["config"].arn}/*"]
+    resources = ["arn:aws:s3:::${data.aws_ssm_parameter.buckets["config"].value}/*"]
   }
 
   statement {
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
-    resources = [aws_s3_bucket.this["processed"].arn, "${aws_s3_bucket.this["processed"].arn}/*"]
+    actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
+    resources = [
+      "arn:aws:s3:::${data.aws_ssm_parameter.buckets["processed"].value}",
+      "arn:aws:s3:::${data.aws_ssm_parameter.buckets["processed"].value}/*",
+    ]
   }
 
   statement {
@@ -65,13 +55,16 @@ data "aws_iam_policy_document" "glue_job_permissions" {
 
   statement {
     actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.crawler.arn]
+    resources = [var.crawler_role_arn]
   }
 }
 
 data "aws_iam_policy_document" "crawler_permissions" {
   statement {
-    actions   = ["s3:GetObject", "s3:ListBucket"]
-    resources = [aws_s3_bucket.this["processed"].arn, "${aws_s3_bucket.this["processed"].arn}/*"]
+    actions = ["s3:GetObject", "s3:ListBucket"]
+    resources = [
+      "arn:aws:s3:::${data.aws_ssm_parameter.buckets["processed"].value}",
+      "arn:aws:s3:::${data.aws_ssm_parameter.buckets["processed"].value}/*",
+    ]
   }
 }

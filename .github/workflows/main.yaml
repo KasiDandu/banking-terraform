@@ -19,6 +19,13 @@ on:
         description: "Required for action=destroy: type the literal word 'destroy'"
         required: false
 
+# buckets/iam are foundational, low-risk, and idempotent (S3 buckets, IAM
+# roles + managed-policy attachments -- no business logic), so the plan job
+# applies them directly rather than routing them through the approval gate
+# below. banking-data (the actual pipeline: Lambda/Glue/EventBridge) is the
+# one unit that goes through plan -> upload artifact -> manual approval ->
+# apply exactly that plan.
+
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
 
@@ -65,6 +72,9 @@ jobs:
           echo "TF_VAR_lambda_s3_keys={\"event_handler\":\"$LAMBDA_KEY\"}" >> "$GITHUB_ENV"
           echo "TF_VAR_glue_script_s3_keys={\"etl\":\"$GLUE_SCRIPT_KEY\"}" >> "$GITHUB_ENV"
           echo "TF_VAR_glue_common_s3_key=$GLUE_COMMON_KEY" >> "$GITHUB_ENV"
+
+      - name: Apply foundation (buckets + iam)
+        run: make -C deploys foundation-apply ENV="${{ inputs.environment }}"
 
       - name: Terragrunt plan (or destroy-plan)
         run: |

@@ -4,34 +4,12 @@ locals {
     for f in fileset("${path.module}/config", "*.json") : trimsuffix(f, ".json")
   ])
 
-  buckets          = var.buckets.with_terraform_buckets
   lambda_functions = var.lambda_functions
   glue_jobs        = var.glue_jobs
 
   # eventbridge-rules.json is a JSON array (each rule carries its own name),
   # keyed here by that name so it can drive a Terraform for_each.
   eventbridge_rules = { for r in var.eventbridge_rules : r.name => r }
-}
-
-# ---------------------------------------------------------------------------
-# Terraform state lock (S3 backend's dynamodb_table) -- bootstrapped via the
-# AWS CLI (or terraform/backend, see that root's README) before this resource
-# block existed, then imported, since the S3 backend must be able to acquire
-# a lock in this table before it can run any operation on this very
-# configuration, including creating the table itself.
-# ---------------------------------------------------------------------------
-
-resource "aws_dynamodb_table" "terraform_lock" {
-  name         = "${local.name_prefix}-tfstate-lock"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = { Name = "${local.name_prefix}-tfstate-lock" }
 }
 
 # ---------------------------------------------------------------------------
@@ -50,7 +28,7 @@ resource "aws_athena_workgroup" "this" {
     publish_cloudwatch_metrics_enabled = true
 
     result_configuration {
-      output_location = "s3://${aws_s3_bucket.this["athena"].bucket}/"
+      output_location = "s3://${data.aws_ssm_parameter.buckets["athena"].value}/"
     }
   }
 
@@ -70,7 +48,7 @@ resource "aws_glue_catalog_table" "audit_lineage" {
     "projection.dt.type"        = "date"
     "projection.dt.format"      = "yyyy-MM-dd"
     "projection.dt.range"       = "NOW-4YEARS,NOW+1DAYS"
-    "storage.location.template" = "s3://${aws_s3_bucket.this["processed"].bucket}/audit/lineage/source=$${source}/dt=$${dt}/"
+    "storage.location.template" = "s3://${data.aws_ssm_parameter.buckets["processed"].value}/audit/lineage/source=$${source}/dt=$${dt}/"
   }
 
   partition_keys {
@@ -83,7 +61,7 @@ resource "aws_glue_catalog_table" "audit_lineage" {
   }
 
   storage_descriptor {
-    location      = "s3://${aws_s3_bucket.this["processed"].bucket}/audit/lineage/"
+    location      = "s3://${data.aws_ssm_parameter.buckets["processed"].value}/audit/lineage/"
     input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
     output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
 
@@ -126,14 +104,6 @@ resource "aws_glue_catalog_table" "audit_lineage" {
 # ---------------------------------------------------------------------------
 # SSM parameters (operational visibility for other consumers)
 # ---------------------------------------------------------------------------
-
-resource "aws_ssm_parameter" "buckets" {
-  for_each = local.buckets
-
-  name  = "/${var.project_name}/${var.environment}/buckets/${each.key}"
-  type  = "String"
-  value = aws_s3_bucket.this[each.key].bucket
-}
 
 resource "aws_ssm_parameter" "glue_job_names" {
   for_each = local.glue_jobs

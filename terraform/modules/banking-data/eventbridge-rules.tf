@@ -1,10 +1,11 @@
 # Generic EventBridge rule factory over eventbridge-rules.json's array
 # (converted to a map keyed by rule name in main.tf's locals). Each rule is
 # either:
-#   - bucket_key + key_prefix -- this module auto-builds an S3 "Object
-#     Created" pattern against that internally-managed bucket (this
-#     pipeline's real trigger, fed by the landing bucket's native S3 ->
-#     EventBridge notifications enabled in buckets.tf), or
+#   - bucket_key -- this module auto-builds an S3 "Object Created" pattern
+#     against that bucket (looked up via SSM, same as everywhere else in
+#     this module -- this pipeline's real trigger, fed by the landing
+#     bucket's native S3 -> EventBridge notifications enabled in the
+#     buckets module), filtered by var.raw_key_prefix, or
 #   - event_pattern -- a raw EventBridge pattern object, used as-is, or
 #   - schedule_expression -- a cron/rate rule instead of an event pattern.
 # Target is either an internally-managed Lambda (target.function_key) or
@@ -18,7 +19,7 @@ locals {
         source      = ["aws.s3"]
         detail-type = ["Object Created"]
         detail = {
-          bucket = { name = [aws_s3_bucket.this[rule.bucket_key].bucket] }
+          bucket = { name = [data.aws_ssm_parameter.buckets[rule.bucket_key].value] }
           object = { key = [{ prefix = var.raw_key_prefix }] }
         }
       }) : lookup(rule, "event_pattern", null) != null ? jsonencode(rule.event_pattern) : null

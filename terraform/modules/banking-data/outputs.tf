@@ -1,8 +1,3 @@
-output "bucket_names" {
-  description = "Map of logical bucket key -> actual bucket name."
-  value       = { for k, b in aws_s3_bucket.this : k => b.bucket }
-}
-
 output "lambda_function_names" {
   description = "Map of logical Lambda key -> function name."
   value       = { for k, f in aws_lambda_function.this : k => f.function_name }

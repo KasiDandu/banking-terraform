@@ -28,14 +28,47 @@ variable "artifact_bucket" {
 }
 
 # ---------------------------------------------------------------------------
-# Generic resource factories -- shape documented in
-# terraform/live/banking-data/{buckets,lambda,glue,eventbridge-rules}.json
+# IAM roles -- created by the iam module; populated here via a Terragrunt
+# `dependency` block on that unit's outputs. This module attaches its own
+# service-specific policies to these roles (see iam-roles.tf) but doesn't
+# create or own the roles themselves.
 # ---------------------------------------------------------------------------
 
-variable "buckets" {
-  description = "Bucket factory config: { with_terraform_buckets = { <logical_key> = { bucket_suffix = string } } }."
-  type        = any
+variable "lambda_role_name" {
+  description = "Name of the Lambda execution role (iam module output)."
+  type        = string
 }
+
+variable "lambda_role_arn" {
+  description = "ARN of the Lambda execution role (iam module output)."
+  type        = string
+}
+
+variable "glue_job_role_name" {
+  description = "Name of the Glue job execution role (iam module output)."
+  type        = string
+}
+
+variable "glue_job_role_arn" {
+  description = "ARN of the Glue job execution role (iam module output)."
+  type        = string
+}
+
+variable "crawler_role_name" {
+  description = "Name of the crawler role (iam module output)."
+  type        = string
+}
+
+variable "crawler_role_arn" {
+  description = "ARN of the crawler role (iam module output)."
+  type        = string
+}
+
+# ---------------------------------------------------------------------------
+# Generic resource factories -- shape documented in
+# terraform/live/banking-data/{lambda,glue,eventbridge-rules}.json. Bucket
+# creation lives in the separate buckets module (see data.tf's SSM lookups).
+# ---------------------------------------------------------------------------
 
 variable "lambda_functions" {
   description = "Lambda factory config, keyed by logical function name. See lambda.json."

@@ -8,7 +8,7 @@ resource "aws_glue_job" "this" {
 
   name         = "${local.name_prefix}-${each.key}"
   description  = each.value.description
-  role_arn     = aws_iam_role.glue_job.arn
+  role_arn     = var.glue_job_role_arn
   glue_version = each.value.glue_version
 
   worker_type       = each.value.worker_type
@@ -25,10 +25,10 @@ resource "aws_glue_job" "this" {
   default_arguments = merge(
     each.value.default_arguments,
     {
-      "--DATA_BUCKET"      = aws_s3_bucket.this["processed"].bucket
-      "--CRAWLER_ROLE_ARN" = aws_iam_role.crawler.arn
+      "--DATA_BUCKET"      = data.aws_ssm_parameter.buckets["processed"].value
+      "--CRAWLER_ROLE_ARN" = var.crawler_role_arn
       "--extra-py-files"   = "s3://${var.artifact_bucket}/${var.glue_common_s3_key}"
-      "--TempDir"          = "s3://${aws_s3_bucket.this["processed"].bucket}/glue-temp/"
+      "--TempDir"          = "s3://${data.aws_ssm_parameter.buckets["processed"].value}/glue-temp/"
     }
   )
 

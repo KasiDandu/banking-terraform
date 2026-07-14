@@ -1,10 +1,16 @@
 ENV ?= test
 
-.PHONY: fmt plan apply destroy-plan destroy validate
+.PHONY: fmt foundation-plan foundation-apply plan apply destroy-plan destroy validate
 
 fmt:
 	terraform fmt -recursive terraform/
 	terragrunt hclfmt
+
+foundation-plan:
+	$(MAKE) -C deploys foundation-plan ENV=$(ENV)
+
+foundation-apply:
+	$(MAKE) -C deploys foundation-apply ENV=$(ENV)
 
 plan:
 	$(MAKE) -C deploys plan ENV=$(ENV)

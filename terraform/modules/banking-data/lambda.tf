@@ -9,7 +9,7 @@ resource "aws_lambda_function" "this" {
 
   function_name = "${local.name_prefix}-${each.key}"
   description   = each.value.description
-  role          = aws_iam_role.lambda.arn
+  role          = var.lambda_role_arn
   handler       = each.value.handler
   runtime       = each.value.runtime
   memory_size   = each.value.memory_size
@@ -24,7 +24,7 @@ resource "aws_lambda_function" "this" {
     variables = merge(
       each.value.environment_variables,
       lookup(each.value, "glue_job_key", null) != null ? {
-        CONFIG_BUCKET     = aws_s3_bucket.this["config"].bucket
+        CONFIG_BUCKET     = data.aws_ssm_parameter.buckets["config"].value
         GLUE_JOB_NAME     = aws_glue_job.this[each.value.glue_job_key].name
         RAW_KEY_PREFIX    = var.raw_key_prefix
         CONFIG_KEY_PREFIX = var.config_key_prefix
