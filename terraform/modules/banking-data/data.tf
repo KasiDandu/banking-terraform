@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 # Bucket names come from the buckets module via SSM Parameter Store lookup
 # (not a Terraform reference or Terragrunt dependency) -- decouples this
 # module from needing direct access to the buckets unit's state.
@@ -13,9 +15,29 @@ data "aws_iam_policy_document" "lambda_permissions" {
     resources = ["arn:aws:s3:::${data.aws_ssm_parameter.buckets["config"].value}/*"]
   }
 
+  # Without s3:ListBucket, S3 returns 403 (not 404) for HeadObject/GetObject
+  # on a key that simply doesn't exist -- indistinguishable from an actual
+  # permissions problem. _config_exists()'s "no config for this source"
+  # path relies on getting a real 404 back.
+  statement {
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${data.aws_ssm_parameter.buckets["config"].value}"]
+  }
+
   statement {
     actions   = ["glue:StartJobRun"]
     resources = [for job in aws_glue_job.this : job.arn]
+  }
+
+  # event_handler resolves CONFIG_BUCKET/GLUE_JOB_NAME from these at cold
+  # start (see lambda_function.py) rather than being handed the values
+  # directly.
+  statement {
+    actions = ["ssm:GetParameter"]
+    resources = [
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/buckets/config",
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/glue_jobs/*",
+    ]
   }
 }
 

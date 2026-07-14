@@ -1,8 +1,10 @@
 # Generic Lambda factory: every function declared in lambda.json gets
 # created here. A function's own environment_variables always apply; if its
-# JSON entry also sets glue_job_key, CONFIG_BUCKET/GLUE_JOB_NAME/
+# JSON entry also sets glue_job_key, PROJECT_NAME/ENVIRONMENT/GLUE_JOB_KEY/
 # RAW_KEY_PREFIX/CONFIG_KEY_PREFIX are additionally wired in automatically
-# (this is what "event_handler" uses to know which Glue job to start).
+# (this is what "event_handler" uses to resolve CONFIG_BUCKET/GLUE_JOB_NAME
+# from SSM at cold start, rather than being handed the resolved values
+# directly -- see lambda_function.py).
 
 resource "aws_lambda_function" "this" {
   for_each = local.lambda_functions
@@ -24,8 +26,9 @@ resource "aws_lambda_function" "this" {
     variables = merge(
       each.value.environment_variables,
       lookup(each.value, "glue_job_key", null) != null ? {
-        CONFIG_BUCKET     = data.aws_ssm_parameter.buckets["config"].value
-        GLUE_JOB_NAME     = aws_glue_job.this[each.value.glue_job_key].name
+        PROJECT_NAME      = var.project_name
+        ENVIRONMENT       = var.environment
+        GLUE_JOB_KEY      = each.value.glue_job_key
         RAW_KEY_PREFIX    = var.raw_key_prefix
         CONFIG_KEY_PREFIX = var.config_key_prefix
       } : {}
@@ -33,6 +36,14 @@ resource "aws_lambda_function" "this" {
   }
 
   tags = { Name = "${local.name_prefix}-${each.key}" }
+
+  # Nothing in this resource references aws_ssm_parameter.glue_job_names or
+  # data.aws_ssm_parameter.buckets directly anymore (the function reads them
+  # itself at cold start via GLUE_JOB_KEY/PROJECT_NAME/ENVIRONMENT) -- without
+  # an explicit depends_on, Terraform has no way to know this function
+  # shouldn't be created before the SSM parameters it'll look up at runtime
+  # exist.
+  depends_on = [aws_ssm_parameter.glue_job_names]
 }
 
 resource "aws_lambda_permission" "allow_eventbridge" {
