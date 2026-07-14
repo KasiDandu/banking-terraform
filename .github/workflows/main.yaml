@@ -9,6 +9,12 @@ on:
         type: choice
         options: [test, prod]
         default: test
+      module:
+        description: "Which module to target"
+        required: true
+        type: choice
+        options: [all, buckets, iam, banking-data]
+        default: all
       action:
         description: "What to run"
         required: true
@@ -19,12 +25,11 @@ on:
         description: "Required for action=destroy: type the literal word 'destroy'"
         required: false
 
-# buckets/iam are foundational, low-risk, and idempotent (S3 buckets, IAM
-# roles + managed-policy attachments -- no business logic), so the plan job
-# applies them directly rather than routing them through the approval gate
-# below. banking-data (the actual pipeline: Lambda/Glue/EventBridge) is the
-# one unit that goes through plan -> upload artifact -> manual approval ->
-# apply exactly that plan.
+# Every module -- buckets, iam, banking-data, or all three via module=all --
+# goes through the same plan -> upload artifact -> manual approval -> apply
+# flow below, so there's one consistent audit trail regardless of which unit
+# is targeted. deploys/Makefile's MODULE=all fans out in dependency order
+# (buckets/iam before banking-data on apply, the reverse on destroy).
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
@@ -59,6 +64,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Resolve latest build artifact keys
+        if: inputs.module == 'all' || inputs.module == 'banking-data'
         run: |
           LAMBDA_KEY=$(aws s3api list-objects-v2 --bucket "${{ vars.ARTIFACT_BUCKET }}" --prefix "lambda/sha256/" --query 'sort_by(Contents,&LastModified)[-1].Key' --output text)
           GLUE_SCRIPT_KEY=$(aws s3api list-objects-v2 --bucket "${{ vars.ARTIFACT_BUCKET }}" --prefix "glue/sha256/" --query "sort_by(Contents[?ends_with(Key, 'glue_script.py')],&LastModified)[-1].Key" --output text)
@@ -86,22 +92,23 @@ jobs:
           glue_common_s3_key = "$GLUE_COMMON_KEY"
           EOF
 
-      - name: Apply foundation (buckets + iam)
-        run: make -C deploys foundation-apply ENV="${{ inputs.environment }}"
-
       - name: Terragrunt plan (or destroy-plan)
         run: |
           if [ "${{ inputs.action }}" = "destroy" ]; then
-            make -C deploys destroy-plan ENV="${{ inputs.environment }}"
+            make -C deploys destroy-plan ENV="${{ inputs.environment }}" MODULE="${{ inputs.module }}"
           else
-            make -C deploys plan ENV="${{ inputs.environment }}"
+            make -C deploys plan ENV="${{ inputs.environment }}" MODULE="${{ inputs.module }}"
           fi
 
-      - name: Upload plan artifact
+      - name: Upload plan artifact(s)
         uses: actions/upload-artifact@v4
         with:
           name: tfplan
-          path: terraform/live/banking-data/tfplan
+          # Matches one file (the targeted module) or three (module=all) --
+          # upload-artifact preserves the path hierarchy below the common
+          # ancestor of the glob matches, so this always extracts back to
+          # terraform/live/<module>/tfplan on download.
+          path: terraform/live/**/tfplan
           retention-days: 1
 
   apply:
@@ -122,11 +129,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Download plan artifact
+      - name: Download plan artifact(s)
         uses: actions/download-artifact@v4
         with:
           name: tfplan
-          path: terraform/live/banking-data
+          path: terraform/live
 
       - name: Apply plan
-        run: make -C deploys apply ENV="${{ inputs.environment }}"
+        run: make -C deploys apply ENV="${{ inputs.environment }}" MODULE="${{ inputs.module }}"

@@ -102,43 +102,48 @@ CloudTrail's.
 ### Build artifacts
 
 `lambda_s3_keys` / `glue_script_s3_keys` are `map(string)` (keyed the same
-as `lambda.json`/`glue.json`), separate from the structural JSON above
-because they change every release. CI resolves them dynamically (see
-`main.yaml`); `environments/test.env` pins a fallback snapshot for
-local/manual runs via `${VAR:-default}`, which a pre-set CI value survives.
-`glue_common_s3_key` is a single shared string — the same `--extra-py-files`
-applies to every Glue job.
+as `lambda.json`/`glue.json`), pinned in `terraform/live/banking-data.tfvars`
+because they change every release. CI overwrites that one file with the
+latest build's keys before planning (see `main.yaml`); the committed values
+are only ever used for local/manual runs. `glue_common_s3_key` is a single
+shared string — the same `--extra-py-files` applies to every Glue job.
 
 ## Running locally
 
 ```
-make foundation-apply ENV=test   # buckets + iam -- low-risk, idempotent, applies directly
-make plan ENV=test               # banking-data only -- the reviewable unit
-make apply ENV=test              # (or destroy-plan / destroy)
+make plan ENV=test MODULE=banking-data     # a single unit
+make apply ENV=test MODULE=banking-data    # applies the exact saved plan
+make plan ENV=test MODULE=all              # all three, in dependency order
+make destroy-plan ENV=test MODULE=buckets  # (or destroy)
 ```
 
-`ENV` selects `environments/<ENV>.env`, sourced (as `TF_VAR_*` plus
-`BACKEND_BUCKET`/`PREFIX_KEY`/`AWS_REGION`/`LOCK_TABLE`) before Terragrunt
-runs. `PREFIX_KEY` is a *prefix*, not a full state key — each of the three
-sibling units appends its own `<unit>/terraform.tfstate` under it, so they
-share one backend bucket and lock table without colliding. `make fmt`
-formats both the `.tf` files and the Terragrunt HCL.
+`MODULE` selects which Terragrunt unit(s) under `terraform/live/` to target:
+`buckets`, `iam`, `banking-data`, or `all` (every unit, fanned out in
+dependency order — `buckets`→`iam`→`banking-data` on `plan`/`apply`, the
+reverse on `destroy-plan`/`destroy`, since `banking-data` must be torn down
+before what it depends on). `ENV` selects `environments/<ENV>.env`, sourced
+(as `TF_VAR_*` plus `BACKEND_BUCKET`/`PREFIX_KEY`/`AWS_REGION`/`LOCK_TABLE`)
+before Terragrunt runs. `PREFIX_KEY` is a *prefix*, not a full state key —
+each of the three sibling units appends its own `<unit>/terraform.tfstate`
+under it, so they share one backend bucket and lock table without
+colliding. `make fmt` formats both the `.tf` files and the Terragrunt HCL.
 
 ## Running via GitHub Actions
 
 Trigger the `Terraform` workflow (`workflow_dispatch`) with:
 - `environment` — `test` or `prod`
+- `module` — `all`, `buckets`, `iam`, or `banking-data`
 - `action` — `plan`, `apply`, or `destroy`
 - `confirm_destroy` — required, must be exactly `destroy`, when `action=destroy`
 
-The `plan` job always applies `buckets`+`iam` directly first (foundational,
-idempotent, no business logic — see above), then plans (or destroy-plans)
-`banking-data` and uploads that as an artifact. `apply`/`destroy` download
-that exact plan and apply it in a second job gated by the `production`
-GitHub Environment — requires manual approval, so the one unit with actual
-pipeline logic never changes unattended. Requires repo secrets
-`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` and repo variables
-`AWS_REGION` / `ARTIFACT_BUCKET`.
+Every module goes through the same plan → upload artifact → manual approval
+→ apply flow (one consistent audit trail regardless of which unit is
+picked) — the `plan` job plans (or destroy-plans) whatever `module` selects
+and uploads the resulting plan file(s) as a build artifact; `apply`/
+`destroy` download those exact plan file(s) and apply them in a second job
+gated by the `production` GitHub Environment, which requires manual
+approval. Requires repo secrets `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` and repo variables `AWS_REGION` / `ARTIFACT_BUCKET`.
 
 ## State locking
 

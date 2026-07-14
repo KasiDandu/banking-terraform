@@ -1,56 +1,61 @@
 SHELL := /bin/bash
 
-ENV            ?= test
-ENV_FILE       := $(CURDIR)/../environments/$(ENV).env
-LIVE_DIR       := $(CURDIR)/../terraform/live/banking-data
-FOUNDATION_DIR := $(CURDIR)/../terraform/live
+ENV      ?= test
+MODULE   ?= banking-data
+ENV_FILE := $(CURDIR)/../environments/$(ENV).env
+LIVE_ROOT := $(CURDIR)/../terraform/live
 
-# Plan file lives at a fixed path OUTSIDE .terragrunt-cache (whose hashed
-# subdirectory name isn't stable across separate plan/apply CI jobs/runs),
-# so a later `apply` can always find it regardless of which cache dir
-# Terragrunt/Terraform actually execute from.
-PLANFILE := $(LIVE_DIR)/tfplan
+# MODULE=all fans out to every unit, in the order dependencies actually
+# require: buckets/iam must exist before banking-data is planned (its
+# `dependency "iam"` block needs iam's *real* outputs, not mocks -- see
+# terragrunt.hcl). Destroying goes the other way: banking-data must be torn
+# down before the buckets/roles it depends on, or it's left referencing
+# resources that no longer exist.
+APPLY_ORDER   := buckets iam banking-data
+DESTROY_ORDER := banking-data iam buckets
 
-.PHONY: foundation-plan foundation-apply plan apply destroy-plan destroy validate
+MODULES_APPLY   := $(if $(filter all,$(MODULE)),$(APPLY_ORDER),$(MODULE))
+MODULES_DESTROY := $(if $(filter all,$(MODULE)),$(DESTROY_ORDER),$(MODULE))
 
-# buckets/iam are foundational and low-risk (a handful of S3 buckets and
-# IAM roles+managed-policy attachments, nothing business-logic-bearing) and
-# idempotent, so they apply directly rather than going through the
-# save-plan-then-approve gate. banking-data (the actual pipeline logic)
-# depends on both being real first -- its own dependency block deliberately
-# only allows mock outputs for `validate`, not `plan`, since a saved plan
-# bakes in whatever values were real (or mocked) at plan time and replays
-# them verbatim on apply, ignoring any fresher env vars.
-foundation-plan:
-	set -a && source "$(ENV_FILE)" && set +a && \
-	cd "$(FOUNDATION_DIR)/buckets" && terragrunt plan && \
-	cd "$(FOUNDATION_DIR)/iam" && terragrunt plan
+# Plan file lives at a fixed path per unit (LIVE_ROOT/<module>/tfplan),
+# OUTSIDE .terragrunt-cache (whose hashed subdirectory name isn't stable
+# across separate plan/apply CI jobs/runs), so a later `apply` can always
+# find it regardless of which cache dir Terragrunt/Terraform actually
+# executed from.
 
-foundation-apply:
-	set -a && source "$(ENV_FILE)" && set +a && \
-	cd "$(FOUNDATION_DIR)/buckets" && terragrunt apply -auto-approve && \
-	cd "$(FOUNDATION_DIR)/iam" && terragrunt apply -auto-approve
+.PHONY: plan apply destroy-plan destroy validate
 
 plan:
 	set -a && source "$(ENV_FILE)" && set +a && \
-	cd "$(LIVE_DIR)" && terragrunt plan -out="$(PLANFILE)"
+	for m in $(MODULES_APPLY); do \
+	  echo "==> plan: $$m" && \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt plan -out=tfplan) || exit 1; \
+	done
 
 apply:
 	set -a && source "$(ENV_FILE)" && set +a && \
-	cd "$(LIVE_DIR)" && terragrunt apply "$(PLANFILE)"
+	for m in $(MODULES_APPLY); do \
+	  echo "==> apply: $$m" && \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt apply tfplan) || exit 1; \
+	done
 
-# `terragrunt apply <destroy-planfile>` performs the destroy transparently
-# -- the same `apply` mechanics as a normal deploy, just fed a plan that was
-# generated with -destroy. This keeps the reviewable-plan-then-gated-apply
-# flow identical for both directions.
 destroy-plan:
 	set -a && source "$(ENV_FILE)" && set +a && \
-	cd "$(LIVE_DIR)" && terragrunt plan -destroy -out="$(PLANFILE)"
+	for m in $(MODULES_DESTROY); do \
+	  echo "==> destroy-plan: $$m" && \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt plan -destroy -out=tfplan) || exit 1; \
+	done
 
 destroy:
 	set -a && source "$(ENV_FILE)" && set +a && \
-	cd "$(LIVE_DIR)" && terragrunt apply "$(PLANFILE)"
+	for m in $(MODULES_DESTROY); do \
+	  echo "==> destroy: $$m" && \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt apply tfplan) || exit 1; \
+	done
 
 validate:
 	set -a && source "$(ENV_FILE)" && set +a && \
-	cd "$(LIVE_DIR)" && terragrunt validate
+	for m in $(MODULES_APPLY); do \
+	  echo "==> validate: $$m" && \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt validate) || exit 1; \
+	done

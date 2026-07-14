@@ -1,28 +1,23 @@
-ENV ?= test
+ENV    ?= test
+MODULE ?= banking-data
 
-.PHONY: fmt foundation-plan foundation-apply plan apply destroy-plan destroy validate
+.PHONY: fmt plan apply destroy-plan destroy validate
 
 fmt:
 	terraform fmt -recursive terraform/
 	terragrunt hclfmt
 
-foundation-plan:
-	$(MAKE) -C deploys foundation-plan ENV=$(ENV)
-
-foundation-apply:
-	$(MAKE) -C deploys foundation-apply ENV=$(ENV)
-
 plan:
-	$(MAKE) -C deploys plan ENV=$(ENV)
+	$(MAKE) -C deploys plan ENV=$(ENV) MODULE=$(MODULE)
 
 apply:
-	$(MAKE) -C deploys apply ENV=$(ENV)
+	$(MAKE) -C deploys apply ENV=$(ENV) MODULE=$(MODULE)
 
 destroy-plan:
-	$(MAKE) -C deploys destroy-plan ENV=$(ENV)
+	$(MAKE) -C deploys destroy-plan ENV=$(ENV) MODULE=$(MODULE)
 
 destroy:
-	$(MAKE) -C deploys destroy ENV=$(ENV)
+	$(MAKE) -C deploys destroy ENV=$(ENV) MODULE=$(MODULE)
 
 validate:
-	$(MAKE) -C deploys validate ENV=$(ENV)
+	$(MAKE) -C deploys validate ENV=$(ENV) MODULE=$(MODULE)
