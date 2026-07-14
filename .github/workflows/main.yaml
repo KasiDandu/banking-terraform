@@ -1,0 +1,106 @@
+name: Terraform
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to target"
+        required: true
+        type: choice
+        options: [test, prod]
+        default: test
+      action:
+        description: "What to run"
+        required: true
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+      confirm_destroy:
+        description: "Required for action=destroy: type the literal word 'destroy'"
+        required: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  guard:
+    name: Guard destroy confirmation
+    runs-on: self-hosted
+    steps:
+      - name: Check confirmation phrase
+        if: inputs.action == 'destroy'
+        run: |
+          if [ "${{ inputs.confirm_destroy }}" != "destroy" ]; then
+            echo "::error::confirm_destroy must be exactly 'destroy' when action=destroy -- refusing to proceed."
+            exit 1
+          fi
+
+  plan:
+    name: Terragrunt plan
+    needs: guard
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve latest build artifact keys
+        run: |
+          LAMBDA_KEY=$(aws s3api list-objects-v2 --bucket "${{ vars.ARTIFACT_BUCKET }}" --prefix "lambda/sha256/" --query 'sort_by(Contents,&LastModified)[-1].Key' --output text)
+          GLUE_SCRIPT_KEY=$(aws s3api list-objects-v2 --bucket "${{ vars.ARTIFACT_BUCKET }}" --prefix "glue/sha256/" --query "sort_by(Contents[?ends_with(Key, 'glue_script.py')],&LastModified)[-1].Key" --output text)
+          GLUE_COMMON_KEY=$(aws s3api list-objects-v2 --bucket "${{ vars.ARTIFACT_BUCKET }}" --prefix "glue/sha256/" --query "sort_by(Contents[?ends_with(Key, 'glue-common.zip')],&LastModified)[-1].Key" --output text)
+          echo "Resolved lambda_s3_key=$LAMBDA_KEY"
+          echo "Resolved glue_script_s3_key=$GLUE_SCRIPT_KEY"
+          echo "Resolved glue_common_s3_key=$GLUE_COMMON_KEY"
+          echo "TF_VAR_lambda_s3_key=$LAMBDA_KEY" >> "$GITHUB_ENV"
+          echo "TF_VAR_glue_script_s3_key=$GLUE_SCRIPT_KEY" >> "$GITHUB_ENV"
+          echo "TF_VAR_glue_common_s3_key=$GLUE_COMMON_KEY" >> "$GITHUB_ENV"
+
+      - name: Terragrunt plan (or destroy-plan)
+        run: |
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            make -C deploys destroy-plan ENV="${{ inputs.environment }}"
+          else
+            make -C deploys plan ENV="${{ inputs.environment }}"
+          fi
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/live/banking-data/tfplan
+          retention-days: 1
+
+  apply:
+    name: Apply plan
+    needs: plan
+    if: inputs.action != 'plan'
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/live/banking-data
+
+      - name: Apply plan
+        run: make -C deploys apply ENV="${{ inputs.environment }}"

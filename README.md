@@ -1,81 +1,111 @@
 # banking-terraform
 
-Terraform project with a `Terraform Plan` GitHub Actions workflow that runs
-on the self-hosted EC2 runner (see the `ec2-runner` repo).
+Terraform + Terragrunt project for the banking-data pipeline's AWS
+infrastructure. CI runs via the `Terraform` GitHub Actions workflow on the
+self-hosted EC2 runner (see the `ec2-runner` repo).
 
 ## Layout
 
-- `versions.tf` / `providers.tf` / `backend.tf` — provider and remote state config. The S3 backend is configured at `init` time via `-backend-config`, not hardcoded, so the same repo works across environments.
-- `variables.tf` / `main.tf` — add this project's resources to `main.tf`.
-- `envs/*.env` — per-environment variables, sourced before `terraform` commands (as `TF_VAR_*` / `AWS_REGION`).
-- `Makefile` — `make plan` / `make apply` / `make destroy`, parameterized by `ENV_FILE`, `BACKEND_BUCKET`, `PREFIX_KEY`, `LOCK_TABLE`.
-
-## State locking
-
-The S3 backend uses a DynamoDB table (`dynamodb_table`, via `LOCK_TABLE`) so
-concurrent `plan`/`apply` runs fail fast on a lock conflict instead of racing
-and corrupting state. The table (`aws_dynamodb_table.terraform_lock` in
-`main.tf`) is itself Terraform-managed, but had to be created once via the
-AWS CLI and imported — the backend needs to acquire a lock in that table
-before running *any* operation on this config, including the operation that
-would create the table. If you point this repo at a new backend
-bucket/environment, bootstrap its lock table the same way:
-
 ```
-aws dynamodb create-table \
-  --table-name <project>-<env>-tfstate-lock \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
-terraform import aws_dynamodb_table.terraform_lock <project>-<env>-tfstate-lock
+banking-terraform/
+├── .github/workflows/main.yaml   # plan / apply / destroy, one workflow
+├── Makefile                       # make plan|apply|destroy-plan|destroy ENV=test|prod
+├── deploys/
+│   └── Makefile                   # sources environments/<ENV>.env, drives terragrunt
+├── environments/
+│   ├── test.env                   # real -- points at the deployed test stack
+│   ├── prod.env                   # placeholder -- see "Environment promotion" below
+│   └── Makefile                   # `make validate` / `make list`
+└── terraform/
+    ├── backend/                   # one-time bootstrap: state bucket + lock table
+    │   └── main.tf                # (local state -- can't depend on the backend it creates)
+    ├── live/banking-data/         # Terragrunt root: wires the module to a backend
+    │   ├── terragrunt.hcl
+    │   ├── glue.json              # resource-tuning inputs, split by AWS service
+    │   ├── lambda.json
+    │   ├── buckets.json
+    │   ├── eventbridge-rules.json
+    │   └── banking-data.tfvars    # the one value that's truly constant: project_name
+    └── modules/banking-data/      # the actual resources, split by AWS service
+        ├── main.tf                # locals, state lock table, Glue Catalog + Athena, SSM
+        ├── data.tf                # aws_caller_identity + all iam_policy_document data sources
+        ├── buckets.tf             # S3 buckets + bucket policy
+        ├── lambda.tf              # Lambda function + permission
+        ├── glue.tf                # Glue ETL job
+        ├── eventbridge-rules.tf   # CloudTrail + EventBridge rule/target
+        ├── iam-roles.tf           # Lambda/Glue-job/crawler roles, policies, attachments
+        ├── variables.tf / outputs.tf / versions.tf / providers.tf / backend.tf
+        └── config/*.json          # per-source schema configs, uploaded to the config bucket
 ```
 
 ## Running locally
 
 ```
-make plan ENV_FILE=test.env BACKEND_BUCKET=my-tfstate-bucket PREFIX_KEY=envs/test/banking-terraform.tfstate LOCK_TABLE=banking-data-test-tfstate-lock
+make plan ENV=test      # or apply / destroy-plan / destroy
 ```
+
+`ENV` selects `environments/<ENV>.env`, which is sourced (as `TF_VAR_*` plus
+`BACKEND_BUCKET`/`PREFIX_KEY`/`AWS_REGION`/`LOCK_TABLE`) before Terragrunt
+runs in `terraform/live/banking-data`. `make fmt` formats both the `.tf`
+files and the Terragrunt HCL.
 
 ## Running via GitHub Actions
 
-Trigger the `Terraform Plan` workflow manually (`workflow_dispatch`) with:
-- `environment_file` — e.g. `test.env`
-- `backend_bucket` — your Terraform state S3 bucket
-- `prefix_key` — the state file key/prefix
-- `lock_table` — defaults to `banking-data-test-tfstate-lock`
+Trigger the `Terraform` workflow (`workflow_dispatch`) with:
+- `environment` — `test` or `prod`
+- `action` — `plan`, `apply`, or `destroy`
+- `confirm_destroy` — required, must be exactly `destroy`, when `action=destroy`
 
-Requires repo secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` with
-permissions for the backend bucket, the lock table, and any resources in
-`main.tf`.
+Every run does a `plan` first (auto-resolving the latest build's S3 keys by
+querying `LastModified` under `banking-artifacts`' sha256-keyed prefixes, no
+manual paste-in) and uploads it as an artifact. `apply`/`destroy` download
+that exact plan and apply it in a second job gated by the `production`
+GitHub Environment — requires manual approval, so nothing ever touches real
+infrastructure unattended. Requires repo secrets `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` and repo variables `AWS_REGION` / `ARTIFACT_BUCKET`.
+
+## State locking
+
+The S3 backend uses a DynamoDB table (`dynamodb_table`, wired from
+`LOCK_TABLE`) so concurrent `plan`/`apply` runs fail fast on a lock conflict
+instead of racing and corrupting state. `aws_dynamodb_table.terraform_lock`
+in `terraform/modules/banking-data/main.tf` is itself Terraform-managed for
+`test`, but had to be created once via the AWS CLI and imported — the
+backend needs to acquire a lock in that table before running *any*
+operation on this config, including the operation that would create the
+table. `terraform/backend/` (see below) is the proper way to do this for a
+*new* environment instead of repeating that manual dance.
 
 ## Environment promotion (Terragrunt)
 
-`live/test/` and `live/prod/` wrap this same module with per-environment
-config, so promoting a change is "run it in test, then run the identical
-plan in prod" rather than hand-editing variables:
+One live stack (`terraform/live/banking-data/`), reused across
+environments — account/region/state-location differences come from shell
+env vars sourced from `environments/<env>.env`, not from separate
+per-environment directories:
 
-```
-cd live/test && terragrunt plan   # or apply
-cd live/prod && terragrunt plan   # once prod is real -- see below
-```
+- `terraform/live/banking-data/terragrunt.hcl` reads `BACKEND_BUCKET`,
+  `PREFIX_KEY`, `AWS_REGION`, `LOCK_TABLE` via `get_env(...)`, and merges
+  `glue.json`/`lambda.json`/`buckets.json`/`eventbridge-rules.json` into its
+  `inputs` (only the values that *don't* vary by environment).
+- `environments/test.env` sets everything account/build-specific
+  (`TF_VAR_environment`, `TF_VAR_artifact_bucket`, the three build S3 keys,
+  `BACKEND_BUCKET`, etc.) for the real, already-deployed stack.
+- `environments/prod.env` is a **placeholder**: there's no second AWS
+  account yet, so every account-specific value (`assume_role_arn`,
+  `BACKEND_BUCKET`, `artifact_bucket`, ...) points at something that doesn't
+  exist. This is deliberate — running against `prod` fails loudly
+  (AssumeRole / NoSuchBucket) instead of silently deploying "prod"
+  resources into the test account.
+- `terraform/modules/banking-data/providers.tf`'s `assume_role_arn`
+  variable is what makes cross-account promotion possible once a real prod
+  account exists.
 
-- `terragrunt.hcl` (repo root) — shared `remote_state` config (backend
-  bucket/key/region/lock table), read from each environment's `env.hcl` via
-  `get_terragrunt_dir()`. One definition, not copy-pasted per environment.
-- `live/<env>/env.hcl` — the small set of facts that actually differ per
-  environment (account, region, state location, artifact bucket, build keys).
-- `live/<env>/terragrunt.hcl` — `terraform { source = "../.." }` (this repo
-  is the module) plus `inputs` sourced from `env.hcl`.
-- `live/test/` points at the real, already-deployed stack — `terragrunt
-  plan` there reports "No changes", confirming it's the same infrastructure
-  build/apply have been managing all along, not a parallel copy.
-- `live/prod/` is a **placeholder**: there's no second AWS account yet, so
-  every account-specific value (`aws_account_id`, `assume_role_arn`,
-  `backend_bucket`, `artifact_bucket`, ...) in `live/prod/env.hcl` points at
-  something that doesn't exist. This is deliberate — running Terragrunt
-  there fails loudly (AssumeRole / NoSuchBucket) instead of silently
-  deploying "prod" resources into the test account. `providers.tf`'s
-  `assume_role_arn` variable is what makes cross-account promotion possible
-  once a real prod account exists: fill in `live/prod/env.hcl` per its
-  inline comments, bootstrap its S3 bucket + lock table the same way test's
-  were (see "State locking" above), and it's a real second environment.
+To promote to a real second environment:
+
+1. Bootstrap its backend: `cd terraform/backend && terraform init && terraform apply -var="environment=prod" -var="state_bucket_name=<globally-unique-name>"` (see that file's header comment for why this uses local state).
+2. Fill in `environments/prod.env` with the real account ID, role ARN,
+   bucket names, and build keys.
+3. `make plan ENV=prod` — same command, same module, different account.
+
+If more than one prod account is ever needed, add one file per account
+(e.g. `123456789012_prod.env`) rather than overloading `prod.env`.

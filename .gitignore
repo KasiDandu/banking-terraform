@@ -3,7 +3,9 @@
 .terragrunt-cache/
 *.tfstate
 *.tfstate.*
-*.tfvars
+# NOTE: not a blanket *.tfvars ignore -- terraform/live/*/*.tfvars files are
+# committed config (see terragrunt.hcl's extra_arguments), not local secrets.
+*.auto.tfvars
 tfplan
 crash.log
 override.tf
