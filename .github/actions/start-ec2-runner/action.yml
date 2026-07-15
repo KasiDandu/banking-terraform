@@ -1,0 +1,87 @@
+name: Start ephemeral EC2 GitHub runner
+description: >
+  Launches a short-lived EC2 instance, installs Terraform/Terragrunt/AWS CLI via
+  pre-runner-script, and registers it as a self-hosted runner for this job only.
+  Pair with stop-ec2-runner in an `if: always()` cleanup job, or the instance
+  and its runner registration are left running (and billing) indefinitely.
+
+inputs:
+  aws-access-key-id:
+    required: true
+  aws-secret-access-key:
+    required: true
+  aws-region:
+    required: true
+  github-token:
+    required: true
+    description: PAT with Administration (self-hosted runners) permission on this repo
+  ami-id:
+    required: true
+  instance-type:
+    required: true
+  subnet-id:
+    required: true
+  security-group-id:
+    required: true
+  iam-role-name:
+    required: true
+    description: Name of the instance profile (not the role ARN) to attach
+
+outputs:
+  label:
+    description: Runner label to use as the consumer job's runs-on
+    value: ${{ steps.start.outputs.label }}
+  ec2-instance-id:
+    value: ${{ steps.start.outputs.ec2-instance-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Start EC2 runner
+      id: start
+      uses: machulav/ec2-github-runner@v2
+      with:
+        mode: start
+        github-token: ${{ inputs.github-token }}
+        ec2-image-id: ${{ inputs.ami-id }}
+        ec2-instance-type: ${{ inputs.instance-type }}
+        subnet-id: ${{ inputs.subnet-id }}
+        security-group-id: ${{ inputs.security-group-id }}
+        iam-role-name: ${{ inputs.iam-role-name }}
+        # Same tool set as ec2-runner's user_data.sh.tpl (the persistent box),
+        # minus runner registration -- the action does that part itself.
+        # Versions match ec2-runner/variables.tf's terraform_version/
+        # terragrunt_version defaults, so ephemeral and persistent runners
+        # behave identically.
+        pre-runner-script: |
+          #!/bin/bash
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y unzip curl jq git make
+
+          curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          unzip -o /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install
+          rm -rf /tmp/awscliv2.zip /tmp/aws
+
+          curl -fsSL -o /tmp/terraform.zip \
+            "https://releases.hashicorp.com/terraform/1.9.5/terraform_1.9.5_linux_amd64.zip"
+          sudo unzip -o /tmp/terraform.zip -d /usr/local/bin
+          rm -f /tmp/terraform.zip
+
+          curl -fsSL -o /tmp/terragrunt \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/v0.67.4/terragrunt_linux_amd64"
+          sudo mv /tmp/terragrunt /usr/local/bin/terragrunt
+          sudo chmod +x /usr/local/bin/terragrunt
+        aws-resource-tags: >
+          [
+            {"Key": "Name", "Value": "banking-terraform-ephemeral-runner"},
+            {"Key": "GitHubRepository", "Value": "${{ github.repository }}"}
+          ]

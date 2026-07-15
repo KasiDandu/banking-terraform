@@ -29,28 +29,28 @@ plan:
 	set -a && source "$(ENV_FILE)" && set +a && \
 	for m in $(MODULES_APPLY); do \
 	  echo "==> plan: $$m" && \
-	  (cd "$(LIVE_ROOT)/$$m" && terragrunt plan -out=tfplan) || exit 1; \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt plan -out="$(LIVE_ROOT)/$$m/tfplan") || exit 1; \
 	done
 
 apply:
 	set -a && source "$(ENV_FILE)" && set +a && \
 	for m in $(MODULES_APPLY); do \
 	  echo "==> apply: $$m" && \
-	  (cd "$(LIVE_ROOT)/$$m" && terragrunt apply tfplan) || exit 1; \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt apply "$(LIVE_ROOT)/$$m/tfplan") || exit 1; \
 	done
 
 destroy-plan:
 	set -a && source "$(ENV_FILE)" && set +a && \
 	for m in $(MODULES_DESTROY); do \
 	  echo "==> destroy-plan: $$m" && \
-	  (cd "$(LIVE_ROOT)/$$m" && terragrunt plan -destroy -out=tfplan) || exit 1; \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt plan -destroy -out="$(LIVE_ROOT)/$$m/tfplan") || exit 1; \
 	done
 
 destroy:
 	set -a && source "$(ENV_FILE)" && set +a && \
 	for m in $(MODULES_DESTROY); do \
 	  echo "==> destroy: $$m" && \
-	  (cd "$(LIVE_ROOT)/$$m" && terragrunt apply tfplan) || exit 1; \
+	  (cd "$(LIVE_ROOT)/$$m" && terragrunt apply "$(LIVE_ROOT)/$$m/tfplan") || exit 1; \
 	done
 
 validate:

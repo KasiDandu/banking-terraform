@@ -30,6 +30,15 @@ on:
 # flow below, so there's one consistent audit trail regardless of which unit
 # is targeted. deploys/Makefile's MODULE=all fans out in dependency order
 # (buckets/iam before banking-data on apply, the reverse on destroy).
+#
+# Compute is a single EC2 instance launched fresh per run (start-runner ->
+# plan -> apply -> stop-runner, via .github/actions/{start,stop}-ec2-runner),
+# not the always-on box ec2-runner provisions. One instance lives for the
+# whole run, including the plan -> manual-approval -> apply gap -- if that
+# approval takes a while, the instance sits idle (and billing) for that
+# stretch. That's a deliberate simplicity-over-cost tradeoff: one start/stop
+# pair instead of two independent cycles bracketing plan and apply
+# separately.
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
@@ -37,7 +46,7 @@ env:
 jobs:
   guard:
     name: Guard destroy confirmation
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Check confirmation phrase
         if: inputs.action == 'destroy'
@@ -47,10 +56,32 @@ jobs:
             exit 1
           fi
 
+  start-runner:
+    name: Start ephemeral EC2 runner
+    needs: guard
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start.outputs.label }}
+      ec2-instance-id: ${{ steps.start.outputs.ec2-instance-id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: start
+        uses: ./.github/actions/start-ec2-runner
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          ami-id: ${{ vars.EC2_RUNNER_AMI_ID }}
+          instance-type: ${{ vars.EC2_RUNNER_INSTANCE_TYPE || 't3.medium' }}
+          subnet-id: ${{ vars.EC2_RUNNER_SUBNET_ID }}
+          security-group-id: ${{ vars.EC2_RUNNER_SECURITY_GROUP_ID }}
+          iam-role-name: ${{ vars.EC2_RUNNER_IAM_PROFILE }}
+
   plan:
     name: Terragrunt plan
-    needs: guard
-    runs-on: self-hosted
+    needs: start-runner
+    runs-on: ${{ needs.start-runner.outputs.label }}
 
     steps:
       - name: Checkout
@@ -115,7 +146,7 @@ jobs:
     name: Apply plan
     needs: plan
     if: inputs.action != 'plan'
-    runs-on: self-hosted
+    runs-on: ${{ needs.start-runner.outputs.label }}
     environment: production
 
     steps:
@@ -137,3 +168,19 @@ jobs:
 
       - name: Apply plan
         run: make -C deploys apply ENV="${{ inputs.environment }}" MODULE="${{ inputs.module }}"
+
+  stop-runner:
+    name: Stop ephemeral EC2 runner
+    needs: [start-runner, plan, apply]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/stop-ec2-runner
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          label: ${{ needs.start-runner.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
