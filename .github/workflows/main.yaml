@@ -148,7 +148,13 @@ jobs:
 
   apply:
     name: Apply plan
-    needs: plan
+    # Must list start-runner explicitly, not just plan -- runs-on below reads
+    # needs.start-runner.outputs.label, and GitHub Actions only exposes
+    # needs.<job> for jobs actually listed here. Omitting it silently breaks
+    # this job's dispatch (empty runs-on), which doesn't even surface as a
+    # normal job failure -- the run just fails with no "Apply plan" job ever
+    # appearing at all.
+    needs: [start-runner, plan]
     if: inputs.action != 'plan'
     runs-on: ${{ needs.start-runner.outputs.label }}
     environment: production
