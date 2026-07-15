@@ -70,7 +70,11 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          # The runner *host* lives in a different region (us-east-2) than
+          # the infra it deploys (AWS_REGION=us-east-1, where the existing
+          # subnet/security-group/AMI actually are) -- these are unrelated:
+          # `plan`/`apply` below set their own AWS_REGION for Terraform.
+          aws-region: ${{ vars.EC2_RUNNER_REGION }}
           github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           ami-id: ${{ vars.EC2_RUNNER_AMI_ID }}
           instance-type: ${{ vars.EC2_RUNNER_INSTANCE_TYPE || 't3.medium' }}
@@ -180,7 +184,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.EC2_RUNNER_REGION }}
           github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
