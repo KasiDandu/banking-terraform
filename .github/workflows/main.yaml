@@ -177,7 +177,12 @@ jobs:
           path: terraform/live
 
       - name: Apply plan
-        run: make -C deploys apply ENV="${{ inputs.environment }}" MODULE="${{ inputs.module }}"
+        run: |
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            make -C deploys destroy ENV="${{ inputs.environment }}" MODULE="${{ inputs.module }}"
+          else
+            make -C deploys apply ENV="${{ inputs.environment }}" MODULE="${{ inputs.module }}"
+          fi
 
   stop-runner:
     name: Stop ephemeral EC2 runner
