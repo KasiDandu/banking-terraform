@@ -29,4 +29,10 @@ terraform {
 
 inputs = {
   buckets = jsondecode(file("buckets.json"))
+
+  # Only test/ephemeral environments should set FORCE_DESTROY_BUCKETS=true
+  # (see environments/test.env) -- defaults to false so a destroy against an
+  # environment holding real data fails loudly on a non-empty bucket instead
+  # of silently deleting its contents.
+  force_destroy = tobool(get_env("FORCE_DESTROY_BUCKETS", "false"))
 }

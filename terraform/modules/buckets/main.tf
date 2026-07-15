@@ -14,8 +14,9 @@ locals {
 resource "aws_s3_bucket" "this" {
   for_each = local.buckets
 
-  bucket = "${local.name_prefix}-${each.value.bucket_suffix}-${data.aws_caller_identity.current.account_id}"
-  tags   = { Name = "${local.name_prefix}-${each.value.bucket_suffix}" }
+  bucket        = "${local.name_prefix}-${each.value.bucket_suffix}-${data.aws_caller_identity.current.account_id}"
+  force_destroy = var.force_destroy
+  tags          = { Name = "${local.name_prefix}-${each.value.bucket_suffix}" }
 }
 
 # Native S3 -> EventBridge notifications (replaces a CloudTrail data-events

@@ -32,3 +32,9 @@ variable "eventbridge_bucket_key" {
   type        = string
   default     = "landing"
 }
+
+variable "force_destroy" {
+  description = "Allow `terraform destroy` to delete these buckets even if they still contain objects. Leave false (safe) for any environment holding real data -- only test/ephemeral environments should set this true, or a destroy silently fails partway through (BucketNotEmpty) after already tearing down banking-data/iam, leaving an inconsistent state."
+  type        = bool
+  default     = false
+}
